@@ -1,5 +1,7 @@
-use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size, LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color};
+use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size,
+            LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color};
 use druid::RenderContext;
+use druid::widget::{Svg, SvgData};
 use crate::State;
 
 use log::debug;
@@ -67,6 +69,8 @@ impl Widget<State> for Board {
                 }
             }
         }
+
+        let white_pawn = include_str!("./assets/svg/white_pawn.svg").parse::<SvgData>().unwrap();
 
     }
 
