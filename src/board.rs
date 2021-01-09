@@ -1,5 +1,4 @@
-use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size,
-            LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color};
+use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size, LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color, Affine};
 use druid::RenderContext;
 use druid::widget::{Svg, SvgData};
 use crate::State;
@@ -62,16 +61,29 @@ impl Widget<State> for Board {
 
                 let rect = Rect::from_origin_size(point, square_size);
 
-                if (row + col) % 2 == 0 {
-                    ctx.fill(rect, &WHITE);
-                } else {
-                    ctx.fill(rect, &BROWN);
-                }
+                ctx.paint_with_z_index(1, move |ctx| {
+                    if (row + col) % 2 == 0 {
+                        ctx.fill(rect, &WHITE);
+                    } else {
+                        ctx.fill(rect, &BROWN);
+                    }
+                });
             }
         }
 
         let white_pawn = include_str!("./assets/svg/white_pawn.svg").parse::<SvgData>().unwrap();
 
+        // we want our pieces on top of our squares
+        ctx.paint_with_z_index(2, move |ctx| {
+            // let offset_matrix = FillStrat::default().affine_to_fill(ctx.size(), white_pawn.size());
+
+            let clip_rect = Rect::ZERO.with_size(ctx.size());
+
+            // The SvgData's to_piet function does not clip to the svg's size
+            // CairoRenderContext is very like druids but with some extra goodies like clip
+            ctx.clip(clip_rect);
+            white_pawn.to_piet(Affine::default(), ctx);
+        });
     }
 
     fn type_name(&self) -> &'static str {
