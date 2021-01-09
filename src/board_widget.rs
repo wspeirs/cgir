@@ -96,7 +96,9 @@ impl Widget<State> for BoardWidget {
 
                     // we want our pieces on top of our squares
                     ctx.paint_with_z_index(2, move |ctx| {
-                        let translate = Affine::translate((rect.min_x(), rect.min_y()) );
+                        let translate = Affine::translate((rect.min_y() * (45.0f64 / square_width), rect.min_x() * (45.0f64 / square_width)) );
+
+                        debug!("RECT: {:?} -> ({}, {})", rect, rect.min_y(), rect.min_x());
 
                         svg_data.to_piet(svg_scale.clone() * translate, ctx);
                     });
