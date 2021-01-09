@@ -1,11 +1,7 @@
 use druid::widget::prelude::*;
-use druid::widget::{Align, BackgroundBrush, Button, Controller, ControllerHost, Flex, Label, Padding, Container, Split};
+use druid::widget::{Align, BackgroundBrush, Button, Controller, ControllerHost, Flex, Label, Padding, Container, Split, SvgData, Svg};
 use druid::Target::Global;
-use druid::{
-    commands as sys_cmds, AppDelegate, AppLauncher, Application, Color, Command, ContextMenu, Data,
-    DelegateCtx, Handled, LocalizedString, MenuDesc, MenuItem, Selector, Target, WindowDesc,
-    WindowId,
-};
+use druid::{commands as sys_cmds, AppDelegate, AppLauncher, Application, Color, Command, ContextMenu, Data, DelegateCtx, Handled, LocalizedString, MenuDesc, MenuItem, Selector, Target, WindowDesc, WindowId, WidgetExt};
 
 use log::info;
 
@@ -31,7 +27,7 @@ pub fn main() {
 fn ui_builder() -> impl Widget<State> {
     let top_container = Container::new(
         Split::columns(
-            Align::centered(Board{}),
+            Align::centered(Board {}),
             Align::centered(Label::new("PLYS"))
         ).draggable(true)
     );

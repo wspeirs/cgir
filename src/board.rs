@@ -1,4 +1,4 @@
-use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size, LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color, Affine};
+use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size, LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color, Affine, WidgetExt};
 use druid::RenderContext;
 use druid::widget::{Svg, SvgData};
 use crate::State;
@@ -31,6 +31,8 @@ impl Widget<State> for Board {
 
         let max_size = bc.max();
         let min_side = max_size.height.min(max_size.width);
+
+        // return something that's square
         Size {
             width: min_side,
             height: min_side,
@@ -41,22 +43,22 @@ impl Widget<State> for Board {
         debug!("Board::paint");
 
         let size: Size = ctx.size();
-        let w0 = size.width / 8.0f64;
-        let h0 = size.height / 8.0f64;
+        let square_width = size.width / 8.0f64;
+        let square_height = size.height / 8.0f64;
 
         let square_size = Size {
-            width: w0,
-            height: h0,
+            width: square_width,
+            height: square_height,
         };
 
-        // self.cell_size = square_size;
+        debug!("CTX SIZE: {:?} SQUARE SIZE: {:?}", size, square_size);
 
         // go through and paint the board
         for row in 0..8 {
             for col in 0..8 {
                 let point = Point {
-                    x: w0 * row as f64,
-                    y: h0 * col as f64,
+                    x: square_width * row as f64,
+                    y: square_height * col as f64,
                 };
 
                 let rect = Rect::from_origin_size(point, square_size);
@@ -71,18 +73,16 @@ impl Widget<State> for Board {
             }
         }
 
-        let white_pawn = include_str!("./assets/svg/white_pawn.svg").parse::<SvgData>().unwrap();
+        let white_pawn_svg_data = include_str!("./assets/svg/white_pawn.svg").parse::<SvgData>().unwrap();
+
+        let data_clone = data.clone();
+        let env_clone = env.clone();
 
         // we want our pieces on top of our squares
         ctx.paint_with_z_index(2, move |ctx| {
-            // let offset_matrix = FillStrat::default().affine_to_fill(ctx.size(), white_pawn.size());
-
-            let clip_rect = Rect::ZERO.with_size(ctx.size());
-
-            // The SvgData's to_piet function does not clip to the svg's size
-            // CairoRenderContext is very like druids but with some extra goodies like clip
-            ctx.clip(clip_rect);
-            white_pawn.to_piet(Affine::default(), ctx);
+            // compute the scale ratio between the space size and the piece
+            let affine_matrix = Affine::scale(square_width / 45.0f64);
+            white_pawn_svg_data.to_piet(affine_matrix, ctx);
         });
     }
 
