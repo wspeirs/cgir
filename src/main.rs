@@ -1,7 +1,10 @@
+use std::collections::HashSet;
+use std::default::Default;
+
 use druid::widget::prelude::*;
 use druid::widget::{Align, BackgroundBrush, Button, Controller, ControllerHost, Flex, Label, Padding, Container, Split, SvgData, Svg};
 use druid::Target::Global;
-use druid::{commands as sys_cmds, AppDelegate, AppLauncher, Application, Color, Command, ContextMenu, Data, DelegateCtx, Handled, LocalizedString, MenuDesc, MenuItem, Selector, Target, WindowDesc, WindowId, WidgetExt};
+use druid::{commands as sys_cmds, AppDelegate, AppLauncher, Application, Color, Command, ContextMenu, Data, DelegateCtx, Handled, LocalizedString, MenuDesc, MenuItem, Selector, Target, WindowDesc, WindowId, WidgetExt, MouseEvent};
 
 use log::info;
 use chess::Board;
@@ -12,7 +15,8 @@ use board_widget::BoardWidget;
 
 #[derive(Debug, Clone, Default)]
 pub struct State {
-    board :Board // this is our chess board
+    board: Board, // this is our chess board,
+    path_squares: HashSet<u8>
 }
 
 impl Data for State {
@@ -35,7 +39,7 @@ pub fn main() {
 fn ui_builder() -> impl Widget<State> {
     let top_container = Container::new(
         Split::columns(
-            Align::centered(BoardWidget {}),
+            Align::centered(BoardWidget::new()),
             Align::centered(Label::new("PLYS"))
         ).draggable(true)
     );

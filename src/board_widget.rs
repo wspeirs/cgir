@@ -1,4 +1,5 @@
-use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size, LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color, Affine, WidgetExt};
+use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size,
+            LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color, Affine, WidgetExt, MouseEvent};
 use druid::RenderContext;
 use druid::widget::{Svg, SvgData};
 use crate::State;
@@ -6,18 +7,117 @@ use std::fs::File;
 use std::io::prelude::*;
 
 
-use log::debug;
-use chess::{Square, Piece};
+use log::{debug, error};
+use chess::{Square, Piece, Board, ChessMove, MoveGen, BitBoard};
 
 const BROWN :Color = Color::rgb8(0x91, 0x67, 0x2c);
 const WHITE :Color = Color::WHITE;
 
 
-pub struct BoardWidget { }
+pub struct BoardWidget {
+    square_size: Size,
+    mouse_down: Option<MouseEvent>, // we deal with mouse events on the _up_ or _move_, so just record this
+}
+
+impl BoardWidget {
+    pub(crate) fn new() -> Self {
+        BoardWidget {
+            square_size: Size::new(0.0, 0.0),
+            mouse_down: None
+        }
+    }
+
+    fn point2square(&self, point :&Point) -> Square {
+        // compute the row & col
+        let row = (point.y / self.square_size.height) as u8;
+        let col = (point.x / self.square_size.width) as u8;
+
+        unsafe { Square::new(8 * row + col) }
+    }
+
+    fn square2piece(board: &Board, square: &Square) -> Option<(Piece, chess::Color)> {
+        if let Some(piece) = board.piece_on(square.clone()) {
+            let color = board.color_on(square.clone()).unwrap();
+
+            Some( (piece, color) )
+        }
+        else {
+            None
+        }
+    }
+
+    fn square2svg(board: &Board, square: &Square) -> Option<SvgData> {
+        if let Some( (piece, color) ) = BoardWidget::square2piece(board, square) {
+            debug!("{:?} => {:?}", square, piece);
+
+            // TODO: Save this data so we're not opening & reading files every time the board is drawn
+            let mut file = File::open(format!("/home/wspeirs/src/cgir/src/assets/svg/{}.svg", piece.to_string(color))).unwrap();
+            let mut contents = String::new();
+            file.read_to_string(&mut contents).unwrap();
+
+            Some(contents.parse::<SvgData>().unwrap())
+        } else {
+            None
+        }
+    }
+}
 
 impl Widget<State> for BoardWidget {
     fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut State, env: &Env) {
         // debug!("Board::event: {:?}", event);
+
+        match event {
+            Event::MouseDown(mouse_event) => { self.mouse_down = Some(mouse_event.clone()); },
+            Event::MouseUp(mouse_event) => {
+                debug!("MOUSE UP");
+                // first check to see if we have a MouseDown... if not, that's an error
+                if self.mouse_down.is_none() {
+                    panic!("No corresponding MouseDown event");
+                }
+
+                // convert both the down & up to squares
+                let from_square = self.point2square(&self.mouse_down.as_ref().unwrap().pos);
+                let to_square = self.point2square(&mouse_event.pos);
+
+                debug!("FROM: {:?} TO: {:?}", from_square, to_square);
+
+                // we're moving here
+                if from_square != to_square {
+                    let color_to_move = data.board.side_to_move();
+                    let (piece, color) = Self::square2piece(&data.board, &from_square).unwrap();
+
+                    // make sure the correct side is trying to move
+                    if color_to_move != color {
+                        error!("Trying to move the wrong color");
+                        return
+                    }
+
+                    // generate the target move the player is trying to make
+                    let target_move = ChessMove::new(from_square, to_square, None);
+
+                    // generate the legal moves that land on the to_square
+                    let mut moves = MoveGen::new_legal(&data.board);
+                    moves.set_iterator_mask(BitBoard::from_square(to_square));
+
+                    for m in &mut moves {
+                        // we found the move as a legal move, so update everything
+                        if m == target_move {
+                            let new_board = data.board.make_move_new(target_move);
+                            data.board = new_board;
+                            return
+                        }
+                    }
+
+                    // if we got here, it wasn't a legal move
+                    error!("NOT A LEGAL MOVE: {:?}", target_move);
+                }
+
+            },
+            Event::MouseMove(mouse_event) => {
+                // TODO: handle drawing the moving of a piece
+            }
+            _ => { }
+        }
     }
 
     fn lifecycle(&mut self, ctx: &mut LifeCycleCtx, event: &LifeCycle, data: &State, env: &Env) {
@@ -25,7 +125,8 @@ impl Widget<State> for BoardWidget {
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx, old_data: &State, data: &State, env: &Env) {
-        unimplemented!()
+        debug!("REPAINTING");
+        ctx.request_paint(); // just always request a paint
     }
 
     fn layout(&mut self, ctx: &mut LayoutCtx, bc: &BoxConstraints, data: &State, env: &Env) -> Size {
@@ -33,6 +134,9 @@ impl Widget<State> for BoardWidget {
 
         let max_size = bc.max();
         let min_side = max_size.height.min(max_size.width);
+
+        // save off the size of the square
+        self.square_size = Size::new(min_side / 8.0f64, min_side / 8.0f64);
 
         // return something that's square
         Size {
@@ -44,29 +148,18 @@ impl Widget<State> for BoardWidget {
     fn paint(&mut self, ctx: &mut PaintCtx, data: &State, env: &Env) {
         debug!("Board::paint");
 
-        let size: Size = ctx.size();
-        let square_width = size.width / 8.0f64;
-        let square_height = size.height / 8.0f64;
-
-        let square_size = Size {
-            width: square_width,
-            height: square_height,
-        };
-
-        debug!("CTX SIZE: {:?} SQUARE SIZE: {:?}", size, square_size);
-
         // compute the scale ratio between the space size and the piece
-        let svg_scale = Affine::scale(square_width / 45.0f64);
+        let svg_scale = Affine::scale(self.square_size.height / 45.0f64);
 
         // go through and paint the board
         for row in 0..8 {
             for col in 0..8 {
                 let point = Point {
-                    x: square_width * row as f64,
-                    y: square_height * col as f64,
+                    x: self.square_size.width * row as f64,
+                    y: self.square_size.height * col as f64,
                 };
 
-                let rect = Rect::from_origin_size(point, square_size);
+                let rect = Rect::from_origin_size(point, self.square_size);
 
                 // this paints the colored square
                 ctx.paint_with_z_index(1, move |ctx| {
@@ -81,26 +174,16 @@ impl Widget<State> for BoardWidget {
                 // and paint that piece if so
                 let square = unsafe { Square::new(8 * row + col) };
 
-                if let Some(piece) = data.board.piece_on(square.clone()) {
-                    debug!("{:?} => {:?}", square, piece);
-
-                    let color = data.board.color_on(square).unwrap();
-                    let mut file = File::open(format!("/home/wspeirs/src/cgir/src/assets/svg/{}.svg", piece.to_string(color))).unwrap();
-                    let mut contents = String::new();
-                    file.read_to_string(&mut contents).unwrap();
-
-                    let svg_data = contents.parse::<SvgData>().unwrap();
-
-                    let data_clone = data.clone();
-                    let env_clone = env.clone();
-
+                if let Some(piece_svg) = Self::square2svg(&data.board, &square) {
                     // we want our pieces on top of our squares
                     ctx.paint_with_z_index(2, move |ctx| {
-                        let translate = Affine::translate((rect.min_y() * (45.0f64 / square_width), rect.min_x() * (45.0f64 / square_width)) );
+                        let translate = Affine::translate((rect.min_y(), rect.min_x()) );
 
                         debug!("RECT: {:?} -> ({}, {})", rect, rect.min_y(), rect.min_x());
 
-                        svg_data.to_piet(svg_scale.clone() * translate, ctx);
+                        // we have to do translate * svg_scale (not svg_scale * translate)
+                        // otherwise, our translate is "in" the scale
+                        piece_svg.to_piet(translate * svg_scale.clone(), ctx);
                     });
                 }
             }
