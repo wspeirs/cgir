@@ -4,13 +4,21 @@ use druid::Target::Global;
 use druid::{commands as sys_cmds, AppDelegate, AppLauncher, Application, Color, Command, ContextMenu, Data, DelegateCtx, Handled, LocalizedString, MenuDesc, MenuItem, Selector, Target, WindowDesc, WindowId, WidgetExt};
 
 use log::info;
+use chess::Board;
 
-mod board;
+mod board_widget;
 
-use board::Board;
+use board_widget::BoardWidget;
 
-#[derive(Debug, Clone, Default, Data)]
+#[derive(Debug, Clone, Default)]
 pub struct State {
+    board :Board // this is our chess board
+}
+
+impl Data for State {
+    fn same(&self, other: &Self) -> bool {
+        self.board.combined() == other.board.combined()
+    }
 }
 
 pub fn main() {
@@ -27,7 +35,7 @@ pub fn main() {
 fn ui_builder() -> impl Widget<State> {
     let top_container = Container::new(
         Split::columns(
-            Align::centered(Board {}),
+            Align::centered(BoardWidget {}),
             Align::centered(Label::new("PLYS"))
         ).draggable(true)
     );
