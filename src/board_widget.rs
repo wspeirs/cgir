@@ -9,30 +9,48 @@ use std::io::prelude::*;
 
 use log::{debug, error};
 use chess::{Square, Piece, Board, ChessMove, MoveGen, BitBoard};
+use druid::kurbo::Circle;
 
 const BROWN :Color = Color::rgb8(0x91, 0x67, 0x2c);
 const WHITE :Color = Color::WHITE;
-
+const HIGHLIGHT :Color = Color::AQUA;
+const GREEN :Color = Color::GREEN;
 
 pub struct BoardWidget {
     square_size: Size,
     mouse_down: Option<MouseEvent>, // we deal with mouse events on the _up_ or _move_, so just record this
+    selected_square: Option<Square>
 }
 
 impl BoardWidget {
     pub(crate) fn new() -> Self {
         BoardWidget {
             square_size: Size::new(0.0, 0.0),
-            mouse_down: None
+            mouse_down: None,
+            selected_square: None
         }
     }
 
+    /// Converts a point on the board into a square
     fn point2square(&self, point :&Point) -> Square {
         // compute the row & col
         let row = (point.y / self.square_size.height) as u8;
         let col = (point.x / self.square_size.width) as u8;
 
         unsafe { Square::new(8 * row + col) }
+    }
+
+    /// Gets the rectangle bounding a given square
+    fn square2rect(&self, square :&Square) -> Rect {
+        let col = square.get_rank().to_index();
+        let row = square.get_file().to_index();
+
+        let point = Point {
+            x: self.square_size.width * row as f64,
+            y: self.square_size.height * col as f64,
+        };
+
+        Rect::from_origin_size(point, self.square_size)
     }
 
     fn square2piece(board: &Board, square: &Square) -> Option<(Piece, chess::Color)> {
@@ -48,7 +66,7 @@ impl BoardWidget {
 
     fn square2svg(board: &Board, square: &Square) -> Option<SvgData> {
         if let Some( (piece, color) ) = BoardWidget::square2piece(board, square) {
-            debug!("{:?} => {:?}", square, piece);
+            // debug!("{:?} => {:?}", square, piece);
 
             // TODO: Save this data so we're not opening & reading files every time the board is drawn
             let mut file = File::open(format!("/home/wspeirs/src/cgir/src/assets/svg/{}.svg", piece.to_string(color))).unwrap();
@@ -76,15 +94,15 @@ impl Widget<State> for BoardWidget {
                 }
 
                 // convert both the down & up to squares
-                let from_square = self.point2square(&self.mouse_down.as_ref().unwrap().pos);
-                let to_square = self.point2square(&mouse_event.pos);
+                let down_square = self.point2square(&self.mouse_down.as_ref().unwrap().pos);
+                let up_square = self.point2square(&mouse_event.pos);
 
-                debug!("FROM: {:?} TO: {:?}", from_square, to_square);
+                debug!("DOWN ON: {:?} UP ON: {:?}", down_square, up_square);
 
                 // we're moving here
-                if from_square != to_square {
+                if down_square != up_square {
                     let color_to_move = data.board.side_to_move();
-                    let (piece, color) = Self::square2piece(&data.board, &from_square).unwrap();
+                    let (piece, color) = Self::square2piece(&data.board, &down_square).unwrap();
 
                     // make sure the correct side is trying to move
                     if color_to_move != color {
@@ -93,26 +111,63 @@ impl Widget<State> for BoardWidget {
                     }
 
                     // generate the target move the player is trying to make
-                    let target_move = ChessMove::new(from_square, to_square, None);
+                    let target_move = ChessMove::new(down_square, up_square, None);
 
                     // generate the legal moves that land on the to_square
                     let mut moves = MoveGen::new_legal(&data.board);
-                    moves.set_iterator_mask(BitBoard::from_square(to_square));
+                    moves.set_iterator_mask(BitBoard::from_square(up_square));
 
                     for m in &mut moves {
                         // we found the move as a legal move, so update everything
                         if m == target_move {
                             let new_board = data.board.make_move_new(target_move);
                             data.board = new_board;
+                            self.selected_square = None; // remove anything that was selected
                             return
                         }
                     }
 
                     // if we got here, it wasn't a legal move
                     error!("NOT A LEGAL MOVE: {:?}", target_move);
-                }
+                } else {
+                    // check to see if we already have a piece selected
+                    // if we do, then they're trying to move that piece
+                    if let Some(selected_square) = self.selected_square {
+                        // need to find all the legal moves for this piece, and mark those squares
+                        let mut moves = MoveGen::new_legal(&data.board);
 
-            },
+                        for m in moves {
+                            // skip moves that don't originate on the selected square
+                            if m.get_source() != selected_square {
+                                continue
+                            }
+
+                            // a legal move is the same as the square that was clicked
+                            if m.get_dest() == down_square {
+                                // make the move
+                                let new_board = data.board.make_move_new(m);
+                                data.board = new_board;
+                                self.selected_square = None;
+                                return
+                            }
+                        }
+
+                        // if we got here, they tried to make an illegal move, so just unselect
+                        self.selected_square = None;
+                        ctx.request_paint(); // request a re-paint
+                    } else {
+                        // we don't already have a square selected
+                        // so check if it's on a square with a piece
+                        if let Some((_piece, color)) = Self::square2piece(&data.board, &down_square) {
+                            // and that color is the one to move
+                            if color == data.board.side_to_move() {
+                                self.selected_square = Some(down_square);
+                                ctx.request_paint(); // request a re-paint
+                            }
+                        }
+                    }
+                }
+            }, // end of MouseUp match
             Event::MouseMove(mouse_event) => {
                 // TODO: handle drawing the moving of a piece
             }
@@ -137,6 +192,8 @@ impl Widget<State> for BoardWidget {
 
         // save off the size of the square
         self.square_size = Size::new(min_side / 8.0f64, min_side / 8.0f64);
+
+        debug!("SQUARE SIZE: {:?}", self.square_size);
 
         // return something that's square
         Size {
@@ -186,6 +243,40 @@ impl Widget<State> for BoardWidget {
                         piece_svg.to_piet(translate * svg_scale.clone(), ctx);
                     });
                 }
+            }
+        }
+
+        // check to see if we have a selected square
+        if let Some(selected_square) = self.selected_square {
+            debug!("SELECTED: {:?}", selected_square);
+
+            let rect = self.square2rect(&selected_square);
+
+            // paint it with the highlight color
+            ctx.paint_with_z_index(1, move |ctx| {
+                ctx.fill(rect, &HIGHLIGHT);
+            });
+
+            // need to find all the legal moves for this piece, and mark those squares
+            let mut moves = MoveGen::new_legal(&data.board);
+
+            debug!("MOVES: {}", moves.len());
+
+            for m in moves {
+                // skip moves that don't originate from this square
+                if m.get_source() != selected_square {
+                    continue;
+                }
+
+                let dest_rect = self.square2rect(&m.get_dest());
+                let radius = dest_rect.width() * 0.165f64; // cover 33% of the square
+                let dot = Circle::new(Point::new(dest_rect.min_x() + dest_rect.width()/2.0, dest_rect.min_y() + dest_rect.width()/2.0), radius);
+
+                debug!("VALID: {:?} -> {:?}", m.get_dest(), dot);
+
+                ctx.paint_with_z_index(3, move |ctx| {
+                    ctx.fill(dot, &GREEN);
+                });
             }
         }
     }

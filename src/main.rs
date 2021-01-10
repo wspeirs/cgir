@@ -4,7 +4,7 @@ use std::default::Default;
 use druid::widget::prelude::*;
 use druid::widget::{Align, BackgroundBrush, Button, Controller, ControllerHost, Flex, Label, Padding, Container, Split, SvgData, Svg};
 use druid::Target::Global;
-use druid::{commands as sys_cmds, AppDelegate, AppLauncher, Application, Color, Command, ContextMenu, Data, DelegateCtx, Handled, LocalizedString, MenuDesc, MenuItem, Selector, Target, WindowDesc, WindowId, WidgetExt, MouseEvent};
+use druid::{commands as sys_cmds, AppDelegate, AppLauncher, Application, Color, Command, ContextMenu, Data, DelegateCtx, Handled, LocalizedString, MenuDesc, MenuItem, Selector, Target, WindowDesc, WindowId, WidgetExt, MouseEvent, WindowState};
 
 use log::info;
 use chess::Board;
@@ -27,6 +27,8 @@ impl Data for State {
 
 pub fn main() {
     let main_window = WindowDesc::new(ui_builder)
+        .set_window_state(WindowState::MAXIMIZED)
+        .window_size(Size::new(1024.0, 1024.0))
         .menu(make_menu(&State::default()))
         .title("CGIR - Chess GUI in Rust");
 
