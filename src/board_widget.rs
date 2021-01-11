@@ -1,6 +1,8 @@
-use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size, LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color, Affine, WidgetExt, MouseEvent, Vec2};
+use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size, LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color, Affine, WidgetExt, MouseEvent, Vec2, FontDescriptor, FontWeight, FontFamily, ArcStr, TextLayout};
 use druid::RenderContext;
-use druid::widget::{Svg, SvgData};
+use druid::widget::{Svg, SvgData, Label};
+use druid::kurbo::Circle;
+
 use crate::State;
 use std::fs::File;
 use std::io::prelude::*;
@@ -8,7 +10,6 @@ use std::io::prelude::*;
 
 use log::{debug, error};
 use chess::{Square, Piece, Board, ChessMove, MoveGen, BitBoard};
-use druid::kurbo::Circle;
 
 const BROWN :Color = Color::rgb8(0x91, 0x67, 0x2c);
 const WHITE :Color = Color::WHITE;
@@ -139,7 +140,7 @@ impl Widget<State> for BoardWidget {
                     // if we do, then they're trying to move that piece
                     if let Some(selected_square) = self.selected_square {
                         // need to find all the legal moves for this piece, and mark those squares
-                        let mut moves = MoveGen::new_legal(&data.board);
+                        let moves = MoveGen::new_legal(&data.board);
 
                         for m in moves {
                             // skip moves that don't originate on the selected square
@@ -249,6 +250,8 @@ impl Widget<State> for BoardWidget {
 
                 let rect = Rect::from_origin_size(point, self.square_size);
 
+                let env_clone = env.clone();
+
                 // this paints the colored square
                 ctx.paint_with_z_index(1, move |ctx| {
                     if (row + col) % 2 == 0 {
@@ -256,6 +259,12 @@ impl Widget<State> for BoardWidget {
                     } else {
                         ctx.fill(rect, &BROWN);
                     }
+
+                    let mut label = TextLayout::<String>::from_text("X");
+                    label.set_text_color(Color::BLACK);
+
+                    label.rebuild_if_needed(ctx.text(), &env_clone);
+                    label.draw(ctx, point);
                 });
 
                 // create a board square from row & col
@@ -306,7 +315,7 @@ impl Widget<State> for BoardWidget {
             });
 
             // need to find all the legal moves for this piece, and mark those squares
-            let mut moves = MoveGen::new_legal(&data.board);
+            let moves = MoveGen::new_legal(&data.board);
 
             debug!("MOVES: {}", moves.len());
 

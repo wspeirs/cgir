@@ -2,9 +2,9 @@ use std::collections::HashSet;
 use std::default::Default;
 
 use druid::widget::prelude::*;
-use druid::widget::{Align, BackgroundBrush, Button, Controller, ControllerHost, Flex, Label, Padding, Container, Split, SvgData, Svg};
+use druid::widget::{Align, BackgroundBrush, Button, Controller, ControllerHost, Flex, Label, Padding, Container, Split, SvgData, Svg, List, Scroll};
 use druid::Target::Global;
-use druid::{commands as sys_cmds, AppDelegate, AppLauncher, Application, Color, Command, ContextMenu, Data, DelegateCtx, Handled, LocalizedString, MenuDesc, MenuItem, Selector, Target, WindowDesc, WindowId, WidgetExt, MouseEvent, WindowState};
+use druid::{commands as sys_cmds, AppDelegate, AppLauncher, Application, Color, Command, ContextMenu, Data, DelegateCtx, Handled, LocalizedString, MenuDesc, MenuItem, Selector, Target, WindowDesc, WindowId, WidgetExt, MouseEvent, WindowState, UnitPoint};
 
 use log::info;
 use chess::Board;
@@ -16,7 +16,6 @@ use board_widget::BoardWidget;
 #[derive(Debug, Clone, Default)]
 pub struct State {
     board: Board, // this is our chess board,
-    path_squares: HashSet<u8>
 }
 
 impl Data for State {
@@ -39,6 +38,18 @@ pub fn main() {
 }
 
 fn ui_builder() -> impl Widget<State> {
+    // let ply_list = Scroll::new(List::new(|| {
+    //     Label::new(|item: &u32, _env: &_| format!("List item #{}", item))
+    //         .align_vertical(UnitPoint::LEFT)
+    //         .padding(10.0)
+    //         .expand()
+    //         .height(50.0)
+    //         .background(Color::rgb(0.5, 0.5, 0.5))
+    //     })
+    // );
+
+
+    // this holds the top 2 splits: board | Plys
     let top_container = Container::new(
         Split::columns(
             Align::centered(BoardWidget::new()),
