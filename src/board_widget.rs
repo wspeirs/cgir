@@ -1,5 +1,4 @@
-use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size,
-            LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color, Affine, WidgetExt, MouseEvent};
+use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size, LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color, Affine, WidgetExt, MouseEvent, Vec2};
 use druid::RenderContext;
 use druid::widget::{Svg, SvgData};
 use crate::State;
@@ -19,7 +18,8 @@ const GREEN :Color = Color::GREEN;
 pub struct BoardWidget {
     square_size: Size,
     mouse_down: Option<MouseEvent>, // we deal with mouse events on the _up_ or _move_, so just record this
-    selected_square: Option<Square>
+    selected_square: Option<Square>,
+    dragging_piece: Option<(Square, Point)>  // square on the board being dragged & it's current position
 }
 
 impl BoardWidget {
@@ -27,7 +27,8 @@ impl BoardWidget {
         BoardWidget {
             square_size: Size::new(0.0, 0.0),
             mouse_down: None,
-            selected_square: None
+            selected_square: None,
+            dragging_piece: None
         }
     }
 
@@ -99,6 +100,10 @@ impl Widget<State> for BoardWidget {
 
                 debug!("DOWN ON: {:?} UP ON: {:?}", down_square, up_square);
 
+                // reset the drag and mouse down regardless
+                self.dragging_piece = None;
+                self.mouse_down = None;
+
                 // we're moving here
                 if down_square != up_square {
                     let color_to_move = data.board.side_to_move();
@@ -169,7 +174,33 @@ impl Widget<State> for BoardWidget {
                 }
             }, // end of MouseUp match
             Event::MouseMove(mouse_event) => {
-                // TODO: handle drawing the moving of a piece
+                // make sure the user is attempting to drag a piece
+                if self.mouse_down.is_none() {
+                    return;
+                }
+
+                debug!("DRAGGING");
+
+                // check to see if we already know we're dragging
+                if let Some((square, pos)) = self.dragging_piece.as_mut() {
+                    // just update the position
+                    *pos = mouse_event.pos;
+                } else {
+                    // this is a new drag, so set it up
+                    let down_square = self.point2square(&self.mouse_down.as_ref().unwrap().pos);
+
+                    // see if there is a piece associated with the MouseDown event
+                    if let Some((piece, color)) = Self::square2piece(&data.board, &down_square) {
+                        // make sure it's the right color (do we really care?!?)
+                        if color != data.board.side_to_move() {
+                            return; // just bail
+                        }
+                        self.dragging_piece = Some( (down_square, mouse_event.pos) );
+                    }
+                }
+
+                // call paint to update
+                ctx.request_paint();
             }
             _ => { }
         }
@@ -203,7 +234,7 @@ impl Widget<State> for BoardWidget {
     }
 
     fn paint(&mut self, ctx: &mut PaintCtx, data: &State, env: &Env) {
-        debug!("Board::paint");
+        // debug!("Board::paint");
 
         // compute the scale ratio between the space size and the piece
         let svg_scale = Affine::scale(self.square_size.height / 45.0f64);
@@ -227,16 +258,33 @@ impl Widget<State> for BoardWidget {
                     }
                 });
 
-                // figure out if we have a piece on the board here
-                // and paint that piece if so
+                // create a board square from row & col
                 let square = unsafe { Square::new(8 * row + col) };
 
+                // first check to see if we're dragging a piece
+                if let Some((dragging_square, pos)) = self.dragging_piece {
+                    // ... and the current square is the one being dragged
+                    if square == dragging_square {
+                        let piece_svg = Self::square2svg(&data.board, &dragging_square).unwrap();
+
+                        // paint this piece in the middle of the mouse position
+                        ctx.paint_with_z_index(2, move |ctx| {
+                            // translate to the position of the mouse, minus half the size of the image
+                            let translate = Affine::translate((pos.x-22.5, pos.y-22.5) );
+                            piece_svg.to_piet(translate * svg_scale.clone(), ctx);
+                        });
+
+                        continue
+                    }
+                }
+
+                // check to see if we have a piece on this square
                 if let Some(piece_svg) = Self::square2svg(&data.board, &square) {
                     // we want our pieces on top of our squares
                     ctx.paint_with_z_index(2, move |ctx| {
                         let translate = Affine::translate((rect.min_y(), rect.min_x()) );
 
-                        debug!("RECT: {:?} -> ({}, {})", rect, rect.min_y(), rect.min_x());
+                        // debug!("RECT: {:?} -> ({}, {})", rect, rect.min_y(), rect.min_x());
 
                         // we have to do translate * svg_scale (not svg_scale * translate)
                         // otherwise, our translate is "in" the scale
