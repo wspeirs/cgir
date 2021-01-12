@@ -1,4 +1,20 @@
-use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size, LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color, Affine, WidgetExt, MouseEvent, Vec2, FontDescriptor, FontWeight, FontFamily, ArcStr, TextLayout};
+use druid::{Widget,
+            EventCtx,
+            LifeCycle,
+            PaintCtx,
+            LifeCycleCtx,
+            BoxConstraints,
+            Size,
+            LayoutCtx,
+            Event,
+            Env,
+            UpdateCtx,
+            Point,
+            Rect,
+            Color,
+            Affine,
+            MouseEvent,
+            TextLayout};
 use druid::RenderContext;
 use druid::widget::{Svg, SvgData, Label};
 use druid::kurbo::Circle;
@@ -9,7 +25,7 @@ use std::io::prelude::*;
 
 
 use log::{debug, error};
-use chess::{Square, Piece, Board, ChessMove, MoveGen, BitBoard};
+use chess::{Square, Piece, Board, ChessMove, MoveGen, BitBoard, Game};
 
 const BROWN :Color = Color::rgb8(0x91, 0x67, 0x2c);
 const WHITE :Color = Color::WHITE;
@@ -107,8 +123,8 @@ impl Widget<State> for BoardWidget {
 
                 // we're moving here
                 if down_square != up_square {
-                    let color_to_move = data.board.side_to_move();
-                    let (piece, color) = Self::square2piece(&data.board, &down_square).unwrap();
+                    let color_to_move = data.game.current_position().side_to_move();
+                    let (piece, color) = Self::square2piece(&data.game.current_position(), &down_square).unwrap();
 
                     // make sure the correct side is trying to move
                     if color_to_move != color {
@@ -120,14 +136,13 @@ impl Widget<State> for BoardWidget {
                     let target_move = ChessMove::new(down_square, up_square, None);
 
                     // generate the legal moves that land on the to_square
-                    let mut moves = MoveGen::new_legal(&data.board);
+                    let mut moves = MoveGen::new_legal(&data.game.current_position());
                     moves.set_iterator_mask(BitBoard::from_square(up_square));
 
                     for m in &mut moves {
                         // we found the move as a legal move, so update everything
                         if m == target_move {
-                            let new_board = data.board.make_move_new(target_move);
-                            data.board = new_board;
+                            data.game.make_move(target_move);
                             self.selected_square = None; // remove anything that was selected
                             return
                         }
@@ -140,7 +155,7 @@ impl Widget<State> for BoardWidget {
                     // if we do, then they're trying to move that piece
                     if let Some(selected_square) = self.selected_square {
                         // need to find all the legal moves for this piece, and mark those squares
-                        let moves = MoveGen::new_legal(&data.board);
+                        let moves = MoveGen::new_legal(&data.game.current_position());
 
                         for m in moves {
                             // skip moves that don't originate on the selected square
@@ -151,8 +166,7 @@ impl Widget<State> for BoardWidget {
                             // a legal move is the same as the square that was clicked
                             if m.get_dest() == down_square {
                                 // make the move
-                                let new_board = data.board.make_move_new(m);
-                                data.board = new_board;
+                                data.game.make_move(m);
                                 self.selected_square = None;
                                 return
                             }
@@ -164,9 +178,9 @@ impl Widget<State> for BoardWidget {
                     } else {
                         // we don't already have a square selected
                         // so check if it's on a square with a piece
-                        if let Some((_piece, color)) = Self::square2piece(&data.board, &down_square) {
+                        if let Some((_piece, color)) = Self::square2piece(&data.game.current_position(), &down_square) {
                             // and that color is the one to move
-                            if color == data.board.side_to_move() {
+                            if color == data.game.current_position().side_to_move() {
                                 self.selected_square = Some(down_square);
                                 ctx.request_paint(); // request a re-paint
                             }
@@ -180,7 +194,7 @@ impl Widget<State> for BoardWidget {
                     return;
                 }
 
-                debug!("DRAGGING");
+                // debug!("DRAGGING");
 
                 // check to see if we already know we're dragging
                 if let Some((square, pos)) = self.dragging_piece.as_mut() {
@@ -191,9 +205,9 @@ impl Widget<State> for BoardWidget {
                     let down_square = self.point2square(&self.mouse_down.as_ref().unwrap().pos);
 
                     // see if there is a piece associated with the MouseDown event
-                    if let Some((piece, color)) = Self::square2piece(&data.board, &down_square) {
+                    if let Some((piece, color)) = Self::square2piece(&data.game.current_position(), &down_square) {
                         // make sure it's the right color (do we really care?!?)
-                        if color != data.board.side_to_move() {
+                        if color != data.game.current_position().side_to_move() {
                             return; // just bail
                         }
                         self.dragging_piece = Some( (down_square, mouse_event.pos) );
@@ -274,7 +288,7 @@ impl Widget<State> for BoardWidget {
                 if let Some((dragging_square, pos)) = self.dragging_piece {
                     // ... and the current square is the one being dragged
                     if square == dragging_square {
-                        let piece_svg = Self::square2svg(&data.board, &dragging_square).unwrap();
+                        let piece_svg = Self::square2svg(&data.game.current_position(), &dragging_square).unwrap();
 
                         // paint this piece in the middle of the mouse position
                         ctx.paint_with_z_index(2, move |ctx| {
@@ -288,7 +302,7 @@ impl Widget<State> for BoardWidget {
                 }
 
                 // check to see if we have a piece on this square
-                if let Some(piece_svg) = Self::square2svg(&data.board, &square) {
+                if let Some(piece_svg) = Self::square2svg(&data.game.current_position(), &square) {
                     // we want our pieces on top of our squares
                     ctx.paint_with_z_index(2, move |ctx| {
                         let translate = Affine::translate((rect.min_y(), rect.min_x()) );
@@ -315,7 +329,7 @@ impl Widget<State> for BoardWidget {
             });
 
             // need to find all the legal moves for this piece, and mark those squares
-            let moves = MoveGen::new_legal(&data.board);
+            let moves = MoveGen::new_legal(&data.game.current_position());
 
             debug!("MOVES: {}", moves.len());
 

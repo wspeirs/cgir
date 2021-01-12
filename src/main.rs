@@ -1,26 +1,66 @@
-use std::collections::HashSet;
 use std::default::Default;
 
 use druid::widget::prelude::*;
-use druid::widget::{Align, BackgroundBrush, Button, Controller, ControllerHost, Flex, Label, Padding, Container, Split, SvgData, Svg, List, Scroll};
-use druid::Target::Global;
-use druid::{commands as sys_cmds, AppDelegate, AppLauncher, Application, Color, Command, ContextMenu, Data, DelegateCtx, Handled, LocalizedString, MenuDesc, MenuItem, Selector, Target, WindowDesc, WindowId, WidgetExt, MouseEvent, WindowState, UnitPoint};
+use druid::widget::{Align, Flex, Label, Container, Split, List, Scroll, LensWrap};
+use druid::{AppLauncher, Color, Data, MenuDesc, MenuItem, WindowDesc, WidgetExt, WindowState, Lens, UnitPoint};
 
 use log::info;
-use chess::Board;
+use chess::{Game, Action};
 
 mod board_widget;
 
 use board_widget::BoardWidget;
+use druid::im::Vector;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct State {
-    board: Board, // this is our chess board,
+    game: Game, // the state of our chess game
 }
 
 impl Data for State {
     fn same(&self, other: &Self) -> bool {
-        self.board.combined() == other.board.combined()
+        self.game.current_position().combined() == other.game.current_position().combined()
+    }
+}
+
+impl Default for State {
+    fn default() -> Self {
+        State {
+            game: Game::new()
+        }
+    }
+}
+
+struct MoveList;
+
+impl Lens<State, Vector<String>> for MoveList {
+    fn with<V, F: FnOnce(&Vector<String>) -> V>(&self, data: &State, f: F) -> V {
+        // convert the list of actions into strings
+        let move_list :Vector<String> = data.game.actions().chunks(2).map(|actions| {
+            let a1 = match actions[0] {
+                Action::MakeMove(chess_move) => { format!("{}", chess_move)}
+                Action::Resign(color) => { format!("{:?} resigns", color)}
+                _ => unimplemented!("Cannot convert draws to moves")
+            };
+
+            if actions.len() == 2 {
+                let a2 = match actions[1] {
+                    Action::MakeMove(chess_move) => { format!("{}", chess_move)}
+                    Action::Resign(color) => { format!("{:?} resigns", color)}
+                    _ => unimplemented!("Cannot convert draws to moves")
+                };
+
+                format!("{} {}", a1, a2)
+            } else {
+                a1
+            }
+        }).collect();
+
+        f(&move_list)
+    }
+
+    fn with_mut<V, F: FnOnce(&mut Vector<String>) -> V>(&self, data: &mut State, f: F) -> V {
+        f(&mut Vector::new())
     }
 }
 
@@ -38,22 +78,31 @@ pub fn main() {
 }
 
 fn ui_builder() -> impl Widget<State> {
-    // let ply_list = Scroll::new(List::new(|| {
-    //     Label::new(|item: &u32, _env: &_| format!("List item #{}", item))
+
+    let ply_list = Scroll::new(List::new(|| {
+        Label::new(|chess_move :&String, _env: &_| chess_move.clone())
+            .align_vertical(UnitPoint::LEFT)
+            .padding(10.0)
+            .expand()
+            .height(50.0)
+            .background(Color::BLACK)
+    }).lens(MoveList)).vertical();
+
+    // let ply_list = LensWrap::<State, Vec<String>, MoveList, List<String>>::new(List::new(|| {
+    //     Label::new(|chess_move: String, _env: &_| chess_move)
     //         .align_vertical(UnitPoint::LEFT)
     //         .padding(10.0)
     //         .expand()
     //         .height(50.0)
     //         .background(Color::rgb(0.5, 0.5, 0.5))
-    //     })
-    // );
+    //     }), MoveList);
 
 
     // this holds the top 2 splits: board | Plys
     let top_container = Container::new(
         Split::columns(
             Align::centered(BoardWidget::new()),
-            Align::centered(Label::new("PLYS"))
+            Align::centered(ply_list)
         ).draggable(true)
     );
 

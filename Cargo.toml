@@ -8,7 +8,8 @@ edition = "2018"
 
 [dependencies]
 chess = "3.1.1"
-druid = {version="0.7.0", features=["svg"]}
+druid = {version="0.7.0", features=["svg", "im"]}
+# itertools = "0.10"
 log = "0.4"
 vampirc-uci = {version="0.11.0", features=["chess"]}
 
