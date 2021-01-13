@@ -36,6 +36,7 @@ struct MoveList;
 impl Lens<State, Vector<String>> for MoveList {
     fn with<V, F: FnOnce(&Vector<String>) -> V>(&self, data: &State, f: F) -> V {
         // convert the list of actions into strings
+        // TODO: add move numbers as well
         let move_list :Vector<String> = data.game.actions().chunks(2).map(|actions| {
             let a1 = match actions[0] {
                 Action::MakeMove(chess_move) => { format!("{}", chess_move)}
@@ -82,21 +83,14 @@ fn ui_builder() -> impl Widget<State> {
     let ply_list = Scroll::new(List::new(|| {
         Label::new(|chess_move :&String, _env: &_| chess_move.clone())
             .align_vertical(UnitPoint::LEFT)
-            .padding(10.0)
+            .padding(7.0)
             .expand()
-            .height(50.0)
+            .height(25.0)
             .background(Color::BLACK)
-    }).lens(MoveList)).vertical();
-
-    // let ply_list = LensWrap::<State, Vec<String>, MoveList, List<String>>::new(List::new(|| {
-    //     Label::new(|chess_move: String, _env: &_| chess_move)
-    //         .align_vertical(UnitPoint::LEFT)
-    //         .padding(10.0)
-    //         .expand()
-    //         .height(50.0)
-    //         .background(Color::rgb(0.5, 0.5, 0.5))
-    //     }), MoveList);
-
+    }).lens(MoveList))
+        .vertical()
+        .align_vertical(UnitPoint::TOP_LEFT)
+        ;
 
     // this holds the top 2 splits: board | Plys
     let top_container = Container::new(
