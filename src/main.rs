@@ -4,13 +4,17 @@ use druid::widget::prelude::*;
 use druid::widget::{Align, Flex, Label, Container, Split, List, Scroll, LensWrap};
 use druid::{AppLauncher, Color, Data, MenuDesc, MenuItem, WindowDesc, WidgetExt, WindowState, Lens, UnitPoint};
 
-use log::info;
-use chess::{Game, Action};
+use log::{debug, info};
+use chess::{Game, Action, ChessMove};
 
 mod board_widget;
+mod uci;
 
 use board_widget::BoardWidget;
 use druid::im::Vector;
+use std::process::{Command, Stdio};
+use vampirc_uci::{parse, UciMessage, ByteVecUciMessage, parse_one};
+use std::io::{Write, BufWriter, BufReader, BufRead, Read, Error};
 
 #[derive(Debug, Clone)]
 pub struct State {
@@ -66,16 +70,19 @@ impl Lens<State, Vector<String>> for MoveList {
 }
 
 pub fn main() {
-    let main_window = WindowDesc::new(ui_builder)
-        .set_window_state(WindowState::MAXIMIZED)
-        .window_size(Size::new(1024.0, 1024.0))
-        .menu(make_menu(&State::default()))
-        .title("CGIR - Chess GUI in Rust");
+    let state = State::default();
 
-    AppLauncher::with_window(main_window)
-        .use_simple_logger()
-        .launch(State::default())
-        .expect("launch failed");
+
+    // let main_window = WindowDesc::new(ui_builder)
+    //     .set_window_state(WindowState::MAXIMIZED)
+    //     .window_size(Size::new(1024.0, 1024.0))
+    //     .menu(make_menu(&State::default()))
+    //     .title("CGIR - Chess GUI in Rust");
+    //
+    // AppLauncher::with_window(main_window)
+    //     .use_simple_logger()
+    //     .launch(State::default())
+    //     .expect("launch failed");
 }
 
 fn ui_builder() -> impl Widget<State> {
