@@ -72,17 +72,16 @@ impl Lens<State, Vector<String>> for MoveList {
 pub fn main() {
     let state = State::default();
 
+    let main_window = WindowDesc::new(ui_builder)
+        .set_window_state(WindowState::MAXIMIZED)
+        .window_size(Size::new(1024.0, 1024.0))
+        .menu(make_menu(&State::default()))
+        .title("CGIR - Chess GUI in Rust");
 
-    // let main_window = WindowDesc::new(ui_builder)
-    //     .set_window_state(WindowState::MAXIMIZED)
-    //     .window_size(Size::new(1024.0, 1024.0))
-    //     .menu(make_menu(&State::default()))
-    //     .title("CGIR - Chess GUI in Rust");
-    //
-    // AppLauncher::with_window(main_window)
-    //     .use_simple_logger()
-    //     .launch(State::default())
-    //     .expect("launch failed");
+    AppLauncher::with_window(main_window)
+        .use_simple_logger()
+        .launch(State::default())
+        .expect("launch failed");
 }
 
 fn ui_builder() -> impl Widget<State> {

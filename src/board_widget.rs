@@ -268,13 +268,16 @@ impl Widget<State> for BoardWidget {
 
                 // this paints the colored square
                 ctx.paint_with_z_index(1, move |ctx| {
+                    // TODO: make this constant... requires newer version of Rust :-|
+                    let col_map:Vec<char> = vec!['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+
                     if (row + col) % 2 == 0 {
                         ctx.fill(rect, &WHITE);
                     } else {
                         ctx.fill(rect, &BROWN);
                     }
 
-                    let mut label = TextLayout::<String>::from_text("X");
+                    let mut label = TextLayout::<String>::from_text(format!("{}{}", col_map[row as usize], col+1));
                     label.set_text_color(Color::BLACK);
 
                     label.rebuild_if_needed(ctx.text(), &env_clone);
