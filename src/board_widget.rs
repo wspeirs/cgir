@@ -26,6 +26,9 @@ use std::io::prelude::*;
 
 use log::{debug, error};
 use chess::{Square, Piece, Board, ChessMove, MoveGen, BitBoard, Game};
+use crate::uci::Uci;
+use std::process::Command;
+use std::collections::HashSet;
 
 const BROWN :Color = Color::rgb8(0x91, 0x67, 0x2c);
 const WHITE :Color = Color::WHITE;
@@ -33,19 +36,26 @@ const HIGHLIGHT :Color = Color::AQUA;
 const GREEN :Color = Color::GREEN;
 
 pub struct BoardWidget {
+    uci: Uci,   // keep the analysis with the widget
     square_size: Size,
     mouse_down: Option<MouseEvent>, // we deal with mouse events on the _up_ or _move_, so just record this
     selected_square: Option<Square>,
-    dragging_piece: Option<(Square, Point)>  // square on the board being dragged & it's current position
+    dragging_piece: Option<(Square, Point)>,  // square on the board being dragged & it's current position
+    pieces_being_attacked: HashSet<Square>
 }
 
 impl BoardWidget {
     pub(crate) fn new() -> Self {
+        // setup the stockfish engine
+        let mut stockfish_cmd = Command::new("/usr/games/stockfish");
+
         BoardWidget {
+            uci: Uci::start_engine(&mut stockfish_cmd),
             square_size: Size::new(0.0, 0.0),
             mouse_down: None,
             selected_square: None,
-            dragging_piece: None
+            dragging_piece: None,
+            pieces_being_attacked: HashSet::new()
         }
     }
 
@@ -226,7 +236,64 @@ impl Widget<State> for BoardWidget {
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx, old_data: &State, data: &State, env: &Env) {
-        debug!("REPAINTING");
+        debug!("Widget::update");
+
+        // check for all our pieces being attacked
+        let mut white_board = data.game.current_position().color_combined(chess::Color::White).clone();
+        let white_squares = white_board.into_iter().collect::<HashSet<Square>>();
+
+        // let mut black_board = data.game.current_position().color_combined(chess::Color::Black).clone();
+        // let black_squares = black_board.into_iter().collect::<HashSet<Square>>();
+
+        // get the board, and reset our set
+        let board = data.game.current_position();
+        self.pieces_being_attacked.clear();
+
+        // go through all the white squares
+        for ws in white_squares {
+            // get all of the bishop, rook, and queen attackers for black
+            let attackers = board.color_combined(chess::Color::Black) &
+                ( (chess::get_bishop_rays(ws) & (board.pieces(Piece::Bishop) | board.pieces(Piece::Queen))) |
+                    (chess::get_rook_rays(ws) & (board.pieces(Piece::Rook) | board.pieces(Piece::Queen))) );
+
+            for attack_square in attackers {
+                let between = chess::between(ws, attack_square) & board.combined();
+
+                // if nothing is between these two squares, then it's an attack
+                if between == chess::EMPTY {
+                    println!("{} ATTACKING {}", attack_square, ws);
+                    self.pieces_being_attacked.insert(ws);
+                }
+            }
+
+            // now look at the knights
+            let attackers = chess::get_knight_moves(ws) & board.color_combined(chess::Color::Black) & board.pieces(Piece::Knight);
+
+            for attack_square in attackers {
+                println!("KNIGHT {} ATTACKING {}", attack_square, ws);
+                self.pieces_being_attacked.insert(ws);
+            }
+        }
+
+        // now look at pawn attacks
+        for black_pawn_square in board.color_combined(chess::Color::Black) & board.pieces(Piece::Pawn) {
+            let attackers = chess::get_pawn_attacks(black_pawn_square, chess::Color::Black, *board.color_combined(chess::Color::White));
+
+            for attacked_square in attackers {
+                println!("PAWN ATTACKING {}", attacked_square);
+                self.pieces_being_attacked.insert(attacked_square);
+            }
+        }
+
+        println!("BEING ATTACKED: {:?}", self.pieces_being_attacked);
+
+        // do the analysis
+        // let analysis = self.uci.analyze(&data.game, Some(5));
+        //
+        // for a in analysis.iter() {
+        //     println!("GOT: {:?}", a);
+        // }
+
         ctx.request_paint(); // just always request a paint
     }
 
@@ -266,6 +333,9 @@ impl Widget<State> for BoardWidget {
 
                 let env_clone = env.clone();
 
+                // create a board square from row & col
+                let square = unsafe { Square::new(8 * row + col) };
+
                 // this paints the colored square
                 ctx.paint_with_z_index(1, move |ctx| {
                     // TODO: make this constant... requires newer version of Rust :-|
@@ -277,15 +347,12 @@ impl Widget<State> for BoardWidget {
                         ctx.fill(rect, &BROWN);
                     }
 
-                    let mut label = TextLayout::<String>::from_text(format!("{}{}", col_map[row as usize], col+1));
+                    let mut label = TextLayout::<String>::from_text(format!("{}{}-{}", col_map[row as usize], col+1, square));
                     label.set_text_color(Color::BLACK);
 
                     label.rebuild_if_needed(ctx.text(), &env_clone);
                     label.draw(ctx, point);
                 });
-
-                // create a board square from row & col
-                let square = unsafe { Square::new(8 * row + col) };
 
                 // first check to see if we're dragging a piece
                 if let Some((dragging_square, pos)) = self.dragging_piece {
@@ -315,6 +382,13 @@ impl Widget<State> for BoardWidget {
                         // we have to do translate * svg_scale (not svg_scale * translate)
                         // otherwise, our translate is "in" the scale
                         piece_svg.to_piet(translate * svg_scale.clone(), ctx);
+                    });
+                }
+
+                // check to see if this square is being attacked
+                if self.pieces_being_attacked.contains(&square) {
+                    ctx.paint_with_z_index(1, move |ctx| {
+                        ctx.fill(rect, &Color::RED);
                     });
                 }
             }

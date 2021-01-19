@@ -1,14 +1,25 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio, ChildStdin, ChildStdout};
 use std::io::{BufReader, Write, BufRead, Read};
-use vampirc_uci::{ByteVecUciMessage, UciMessage, parse_one, UciFen, UciSearchControl, UciTimeControl, UciInfoAttribute};
-use chess::Game;
 use std::thread;
 use std::time::Duration;
+use std::sync::mpsc::{channel, Receiver};
+use std::sync::{Mutex, Arc};
 
-struct Uci {
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+use log::{debug};
+use vampirc_uci::{ByteVecUciMessage, UciMessage, parse_one, UciFen, UciSearchControl, UciTimeControl, UciInfoAttribute};
+use chess::{Game, ChessMove};
+
+#[derive(Clone, Debug, Default)]
+pub struct Analysis {
+    depth: u8,
+    score: i32,
+    moves: Vec<ChessMove>
+}
+
+pub struct Uci {
+    stdin: Arc<Mutex<ChildStdin>>,
+    stdout: Arc<Mutex<BufReader<ChildStdout>>>,
 }
 
 impl Uci {
@@ -24,22 +35,17 @@ impl Uci {
         let mut stdin = child.stdin.unwrap();
         let mut stdout = BufReader::new(child.stdout.unwrap());
 
-        let mut uci = Uci {
-            stdin,
-            stdout
-        };
-
         // init with the UCI message
-        uci.send_msg(UciMessage::Uci);
+        Self::send_msg(&mut stdin, UciMessage::Uci);
 
         // we manually read because a lot of engines send non-UCI at first
         let mut msg_buffer = String::new();
 
-        uci.stdout.read_line(&mut msg_buffer).expect("Error reading");
+        stdout.read_line(&mut msg_buffer).expect("Error reading");
 
         while msg_buffer.find("id ").is_none() {
             msg_buffer.clear();
-            uci.stdout.read_line(&mut msg_buffer).expect("Error reading");
+            stdout.read_line(&mut msg_buffer).expect("Error reading");
         }
 
         // found the first id line
@@ -55,14 +61,14 @@ impl Uci {
             }
 
             // keep reading messages
-            message = uci.recv_msg();
+            message = Self::recv_msg(&mut stdout) ;
         }
 
         // TODO: add option setting here
 
         // check to see if it's ready
-        uci.send_msg(UciMessage::IsReady);
-        message = uci.recv_msg();
+        Self::send_msg(&mut stdin, UciMessage::IsReady);
+        message = Self::recv_msg(&mut stdout) ;
 
         println!("MSG: {:?}", message);
 
@@ -71,99 +77,134 @@ impl Uci {
         }
 
         // let the engine we're staring a new game
-        uci.send_msg(UciMessage::UciNewGame);
+        Self::send_msg(&mut stdin, UciMessage::UciNewGame);
 
         // also tell it to use analysis mode
-        uci.send_msg(UciMessage::SetOption { name: "UCI_AnalyseMode".to_string(), value: Some("true".to_string()) });
+        Self::send_msg(&mut stdin, UciMessage::SetOption { name: "UCI_AnalyseMode".to_string(), value: Some("true".to_string()) });
 
         // check to see if it's ready
-        uci.send_msg(UciMessage::IsReady);
-        message = uci.recv_msg();
+        Self::send_msg(&mut stdin, UciMessage::IsReady);
+        message = Self::recv_msg(&mut stdout) ;
 
         if let UciMessage::ReadyOk = message {
-            uci
+            Uci {
+                stdin: Arc::new(Mutex::new(stdin)),
+                stdout: Arc::new(Mutex::new(stdout))
+            }
         } else {
             panic!("Error setting up engine");
         }
     }
 
-    fn send_msg(&mut self, message :UciMessage) {
-        self.stdin.write_all(ByteVecUciMessage::from(message).as_ref()).expect("Error writing");
-        self.stdin.flush().expect("Error flushing");
+    fn send_msg(stdin :&mut ChildStdin, message :UciMessage) {
+        stdin.write_all(ByteVecUciMessage::from(message).as_ref()).expect("Error writing");
+        stdin.flush().expect("Error flushing");
     }
 
-    fn recv_msg(&mut self) -> UciMessage {
+    fn recv_msg(stdout: &mut BufReader<ChildStdout>) -> UciMessage {
         let mut buff = String::new();
 
-        self.stdout.read_line(&mut buff).expect("Error reading");
+        stdout.read_line(&mut buff).expect("Error reading");
         parse_one(buff.as_str())
     }
 
-    pub fn analyze(&mut self, game :&Game) {
+    /// Given a game, analyze that game to the given depth
+    /// A Receiver of Analysis structs is returned
+    /// When the depth is reached (None for infinite), or the Receiver is dropped,
+    /// the engine will stop its analysis
+    pub fn analyze(&mut self, game :&Game, depth :Option<u8>) -> Receiver<Analysis> {
         println!("CUR POS: {}", game.current_position().to_string());
 
-        // set the position
-        self.send_msg(UciMessage::Position {
-            startpos: false,
-            fen: Some(UciFen(game.current_position().to_string())),
-            moves: vec![]
-        });
+        { // scope our lock
+            let mut stdin = self.stdin.lock().unwrap();
 
-        // tell the engine to start processing
-        // self.send_msg(UciMessage::Go {
-        //     time_control: None,
-        //     search_control: Some(UciSearchControl {
-        //         search_moves: vec![],
-        //         mate: None,
-        //         depth: Some(3),
-        //         nodes: None
-        //     })
-        // });
+            // set the position
+            Self::send_msg(&mut stdin, UciMessage::Position {
+                startpos: false,
+                fen: Some(UciFen(game.current_position().to_string())),
+                moves: vec![]
+            });
 
-        self.send_msg(UciMessage::Go {
-            time_control: Some(UciTimeControl::Infinite),
-            search_control: None
-        });
-
-        // let it think for a while
-        thread::sleep(Duration::from_secs(1));
-
-        // tell it to stop thinking
-        self.send_msg(UciMessage::Stop);
-
-        // read everything it sent back
-        loop {
-            let message = self.recv_msg();
-            // println!("MSG: {:?}", message);
-
-            match message {
-                UciMessage::Info(attrs) => {
-                    let mut info = String::new();
-
-                    for attr in attrs {
-                        match attr {
-                            UciInfoAttribute::Depth(d) => { info.push_str(&format!("DEPTH: {}", d)); },
-                            UciInfoAttribute::Score { cp, .. } => { info.push_str(&format!(" SCORE: {}", cp.unwrap())); },
-                            UciInfoAttribute::Pv(moves) => { info.push_str(&format!(" {}", moves.into_iter().map(|m| m.to_string()).collect::<Vec<_>>().join(","))); }
-                            UciInfoAttribute::CurrMove(chess_move) => { info.push_str(&chess_move.to_string()); },
-                            _ => ()
-                        }
-                    }
-
-                    println!("{}", info);
-                },
-                UciMessage::BestMove { best_move, ponder } => {
-                    println!("BEST MOVE: {}", best_move);
-                    if let Some(ponder) = ponder {
-                        println!("PONDER: {}", ponder);
-                    }
-                    break
-                }
-                _ => {
-                    panic!("Unexpected message: {:?}", message)
-                }
+            // tell the engine to start processing
+            if depth.is_some() {
+                Self::send_msg(&mut stdin, UciMessage::Go {
+                    time_control: None,
+                    search_control: Some(UciSearchControl {
+                        search_moves: vec![],
+                        mate: None,
+                        depth: depth,
+                        nodes: None
+                    })
+                });
+            } else {
+                Self::send_msg(&mut stdin, UciMessage::Go {
+                    time_control: Some(UciTimeControl::Infinite),
+                    search_control: None
+                });
             }
         }
+
+        // clone STDIN & STDOUT
+        let stdin_clone = self.stdin.clone();
+        let stdout_clone = self.stdout.clone();
+
+        // create a channel for sending back the analysis
+        let (tx, rx) = channel();
+
+        // spawn a thread to read the messages from the engine
+        thread::spawn(move || {
+            // read everything it sent back
+            loop {
+                let message = {
+                    let mut stdout = stdout_clone.lock().unwrap();
+
+                    Self::recv_msg(&mut stdout)
+                };
+
+                // println!("MSG: {:?}", message);
+
+                // convert the messages into Analysis
+                match message {
+                    UciMessage::Info(attrs) => {
+                        let mut analysis = Analysis::default();
+
+                        for attr in attrs {
+                            match attr {
+                                UciInfoAttribute::Depth(d) => { analysis.depth = d; },
+                                UciInfoAttribute::Score { cp, .. } => { if let Some(score) = cp { analysis.score = score; } },
+                                UciInfoAttribute::Pv(moves) => { analysis.moves = moves; }
+                                // UciInfoAttribute::CurrMove(chess_move) => { info.push_str(&chess_move.to_string()); },
+                                _ => ()
+                            }
+                        }
+
+                        debug!("ANALYSIS: {:?}", analysis);
+
+                        // send the analysis, check for disconnected receiver
+                        if let Err(send_err) = tx.send(analysis) {
+                            debug!("SEND ERR: {:?}", send_err);
+
+                            // tell the engine to stop
+                            let mut stdin = stdin_clone.lock().unwrap();
+                            Self::send_msg(&mut stdin, UciMessage::Stop);
+                        }
+                    },
+                    UciMessage::BestMove { best_move, ponder } => {
+                    //     println!("BEST MOVE: {}", best_move);
+                    //     if let Some(ponder) = ponder {
+                    //         println!("PONDER: {}", ponder);
+                    //     }
+                        break
+                    }
+                    _ => {
+                        panic!("Unexpected message: {:?}", message)
+                    }
+                }
+            }
+        });
+
+        // return the receiver side of the channel
+        rx
     }
 }
 
