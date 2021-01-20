@@ -16,7 +16,7 @@ use druid::{Widget,
             MouseEvent,
             TextLayout};
 use druid::RenderContext;
-use druid::widget::{Svg, SvgData, Label};
+use druid::widget::{SvgData, Label};
 use druid::kurbo::Circle;
 
 use crate::State;
@@ -25,6 +25,7 @@ use std::io::prelude::*;
 
 
 use log::{debug, error};
+use itertools::rev;
 use chess::{Square, Piece, Board, ChessMove, MoveGen, BitBoard, Game};
 use crate::uci::Uci;
 use std::process::Command;
@@ -37,7 +38,8 @@ const GREEN :Color = Color::GREEN;
 
 pub struct BoardWidget {
     uci: Uci,   // keep the analysis with the widget
-    square_size: Size,
+    square_size: f64,
+    white_bottom: bool, // is white on the bottom of the board?
     mouse_down: Option<MouseEvent>, // we deal with mouse events on the _up_ or _move_, so just record this
     selected_square: Option<Square>,
     dragging_piece: Option<(Square, Point)>,  // square on the board being dragged & it's current position
@@ -51,7 +53,8 @@ impl BoardWidget {
 
         BoardWidget {
             uci: Uci::start_engine(&mut stockfish_cmd),
-            square_size: Size::new(0.0, 0.0),
+            square_size: 0.0,
+            white_bottom: true,
             mouse_down: None,
             selected_square: None,
             dragging_piece: None,
@@ -61,24 +64,33 @@ impl BoardWidget {
 
     /// Converts a point on the board into a square
     fn point2square(&self, point :&Point) -> Square {
-        // compute the row & col
-        let row = (point.y / self.square_size.height) as u8;
-        let col = (point.x / self.square_size.width) as u8;
+        let (row, col) = if self.white_bottom {
+            (7 - ((point.y / self.square_size) as u8), (point.x / self.square_size) as u8)
+        } else {
+            ((point.y / self.square_size) as u8, 7 - ((point.x / self.square_size) as u8))
+        };
+
+        // debug!("P:{} -> R:{} C:{}", point, row, col);
 
         unsafe { Square::new(8 * row + col) }
     }
 
     /// Gets the rectangle bounding a given square
     fn square2rect(&self, square :&Square) -> Rect {
-        let col = square.get_rank().to_index();
-        let row = square.get_file().to_index();
-
-        let point = Point {
-            x: self.square_size.width * row as f64,
-            y: self.square_size.height * col as f64,
+        // the origin is in the upper-left corner of the drawing area
+        // compute the row & col based upon if the board is flipped or not
+        let (row, col) = if self.white_bottom {
+            ((7-square.get_rank().to_index()), square.get_file().to_index())
+        } else {
+            (square.get_rank().to_index(), (7-square.get_file().to_index()))
         };
 
-        Rect::from_origin_size(point, self.square_size)
+        let point = Point::new(self.square_size * col as f64, self.square_size * row as f64);
+        let rect = Rect::from_origin_size(point, Size::new(self.square_size, self.square_size));
+
+        // debug!("R: {} C: {} => {}", row, col, rect);
+
+        rect
     }
 
     fn square2piece(board: &Board, square: &Square) -> Option<(Piece, chess::Color)> {
@@ -125,7 +137,7 @@ impl Widget<State> for BoardWidget {
                 let down_square = self.point2square(&self.mouse_down.as_ref().unwrap().pos);
                 let up_square = self.point2square(&mouse_event.pos);
 
-                debug!("DOWN ON: {:?} UP ON: {:?}", down_square, up_square);
+                debug!("DOWN ON: {} UP ON: {}", down_square, up_square);
 
                 // reset the drag and mouse down regardless
                 self.dragging_piece = None;
@@ -304,7 +316,7 @@ impl Widget<State> for BoardWidget {
         let min_side = max_size.height.min(max_size.width);
 
         // save off the size of the square
-        self.square_size = Size::new(min_side / 8.0f64, min_side / 8.0f64);
+        self.square_size = min_side / 8.0f64;
 
         debug!("SQUARE SIZE: {:?}", self.square_size);
 
@@ -319,78 +331,72 @@ impl Widget<State> for BoardWidget {
         // debug!("Board::paint");
 
         // compute the scale ratio between the space size and the piece
-        let svg_scale = Affine::scale(self.square_size.height / 45.0f64);
+        let svg_scale = Affine::scale(self.square_size / 45.0f64);
 
-        // go through and paint the board
-        for row in 0..8 {
-            for col in 0..8 {
-                let point = Point {
-                    x: self.square_size.width * row as f64,
-                    y: self.square_size.height * col as f64,
-                };
+        // go through each square on the board painting it
+        let sq_it :Box<dyn Iterator<Item=&Square>> = if !self.white_bottom { Box::new(chess::ALL_SQUARES.iter().rev()) } else { Box::new(chess::ALL_SQUARES.iter()) };
 
-                let rect = Rect::from_origin_size(point, self.square_size);
+        for square in sq_it {
+            // debug!("SQ: {}", square);
+            let rect = self.square2rect(square);
 
-                let env_clone = env.clone();
+            let env_clone = env.clone();
 
-                // create a board square from row & col
-                let square = unsafe { Square::new(8 * row + col) };
-
-                // this paints the colored square
-                ctx.paint_with_z_index(1, move |ctx| {
-                    // TODO: make this constant... requires newer version of Rust :-|
-                    let col_map:Vec<char> = vec!['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-
-                    if (row + col) % 2 == 0 {
-                        ctx.fill(rect, &WHITE);
-                    } else {
-                        ctx.fill(rect, &BROWN);
-                    }
-
-                    let mut label = TextLayout::<String>::from_text(format!("{}{}-{}", col_map[row as usize], col+1, square));
-                    label.set_text_color(Color::BLACK);
-
-                    label.rebuild_if_needed(ctx.text(), &env_clone);
-                    label.draw(ctx, point);
-                });
-
-                // first check to see if we're dragging a piece
-                if let Some((dragging_square, pos)) = self.dragging_piece {
-                    // ... and the current square is the one being dragged
-                    if square == dragging_square {
-                        let piece_svg = Self::square2svg(&data.game.current_position(), &dragging_square).unwrap();
-
-                        // paint this piece in the middle of the mouse position
-                        ctx.paint_with_z_index(2, move |ctx| {
-                            // translate to the position of the mouse, minus half the size of the image
-                            let translate = Affine::translate((pos.x-22.5, pos.y-22.5) );
-                            piece_svg.to_piet(translate * svg_scale.clone(), ctx);
-                        });
-
-                        continue
-                    }
+            // this paints the colored square
+            let square_color = if self.pieces_being_attacked.contains(square) {
+                Color::RED
+            } else {
+                // this is convoluted, but works :-)
+                if ((square.get_rank().to_index() % 2) + square.get_file().to_index()) % 2 == 0 {
+                    BROWN
+                } else {
+                    WHITE
                 }
+            };
 
-                // check to see if we have a piece on this square
-                if let Some(piece_svg) = Self::square2svg(&data.game.current_position(), &square) {
-                    // we want our pieces on top of our squares
-                    ctx.paint_with_z_index(2, move |ctx| {
-                        let translate = Affine::translate((rect.min_y(), rect.min_x()) );
+            ctx.paint_with_z_index(1, move |ctx| {
+                ctx.fill(rect, &square_color);
+            });
 
-                        // debug!("RECT: {:?} -> ({}, {})", rect, rect.min_y(), rect.min_x());
+            // label the squares on top of their color
+            ctx.paint_with_z_index(2, move |ctx| {
+                let mut label = TextLayout::<String>::from_text(format!("{}", square));
+                label.set_text_color(Color::BLACK);
+                label.set_text_size(10.5);
 
-                        // we have to do translate * svg_scale (not svg_scale * translate)
-                        // otherwise, our translate is "in" the scale
+                label.rebuild_if_needed(ctx.text(), &env_clone);
+                label.draw(ctx, Point::new(rect.x0, rect.y0));
+            });
+
+            // first check to see if we're dragging a piece
+            if let Some((dragging_square, pos)) = self.dragging_piece {
+                // ... and the current square is the one being dragged
+                if *square == dragging_square {
+                    let piece_svg = Self::square2svg(&data.game.current_position(), &dragging_square).unwrap();
+
+                    // paint this piece in the middle of the mouse position
+                    ctx.paint_with_z_index(3, move |ctx| {
+                        // translate to the position of the mouse, minus half the size of the image
+                        let translate = Affine::translate((pos.x-22.5, pos.y-22.5) );
                         piece_svg.to_piet(translate * svg_scale.clone(), ctx);
                     });
-                }
 
-                // check to see if this square is being attacked
-                if self.pieces_being_attacked.contains(&square) {
-                    ctx.paint_with_z_index(1, move |ctx| {
-                        ctx.fill(rect, &Color::RED);
-                    });
+                    continue
                 }
+            }
+
+            // check to see if we have a piece on this square
+            if let Some(piece_svg) = Self::square2svg(&data.game.current_position(), &square) {
+                // we want our pieces on top of our squares
+                ctx.paint_with_z_index(2, move |ctx| {
+                    let translate = Affine::translate((rect.min_x(), rect.min_y()) );
+
+                    // debug!("RECT: {:?} -> ({}, {})", rect, rect.min_y(), rect.min_x());
+
+                    // we have to do translate * svg_scale (not svg_scale * translate)
+                    // otherwise, our translate is "in" the scale
+                    piece_svg.to_piet(translate * svg_scale.clone(), ctx);
+                });
             }
         }
 

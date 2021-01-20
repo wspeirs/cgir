@@ -1,11 +1,11 @@
 use std::default::Default;
 
 use druid::widget::prelude::*;
-use druid::widget::{Align, Flex, Label, Container, Split, List, Scroll, LensWrap};
+use druid::widget::{Align, Flex, Label, Container, Split, List, Scroll};
 use druid::{AppLauncher, Color, Data, MenuDesc, MenuItem, WindowDesc, WidgetExt, WindowState, Lens, UnitPoint};
 
-use log::{debug, info};
-use chess::{Game, Action, ChessMove};
+// use log::{debug, info};
+use chess::{Game, Action};
 
 mod board_widget;
 mod uci;
@@ -13,8 +13,6 @@ mod uci;
 use board_widget::BoardWidget;
 use druid::im::Vector;
 use std::process::{Command, Stdio};
-use vampirc_uci::{parse, UciMessage, ByteVecUciMessage, parse_one};
-use std::io::{Write, BufWriter, BufReader, BufRead, Read, Error};
 
 #[derive(Debug, Clone)]
 pub struct State {
@@ -41,10 +39,10 @@ impl Lens<State, Vector<String>> for MoveList {
     fn with<V, F: FnOnce(&Vector<String>) -> V>(&self, data: &State, f: F) -> V {
         // convert the list of actions into strings
         // TODO: add move numbers as well
-        let move_list :Vector<String> = data.game.actions().chunks(2).map(|actions| {
+        let move_list :Vector<String> = data.game.actions().chunks(2).enumerate().map(|(num, actions)| {
             let a1 = match actions[0] {
-                Action::MakeMove(chess_move) => { format!("{}", chess_move)}
-                Action::Resign(color) => { format!("{:?} resigns", color)}
+                Action::MakeMove(chess_move) => { format!("{}: {}", num+1, chess_move)}
+                Action::Resign(color) => { format!("{}: {:?} resigns", num+1, color)}
                 _ => unimplemented!("Cannot convert draws to moves")
             };
 
