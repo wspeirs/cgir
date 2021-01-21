@@ -1,7 +1,7 @@
 use std::default::Default;
 
 use druid::widget::prelude::*;
-use druid::widget::{Align, Flex, Label, Container, Split, List, Scroll};
+use druid::widget::{Align, Flex, Label, Container, Split, List, Scroll, Controller};
 use druid::{AppLauncher, Color, Data, MenuDesc, MenuItem, WindowDesc, WidgetExt, WindowState, Lens, UnitPoint};
 
 // use log::{debug, info};
@@ -90,6 +90,14 @@ pub fn main() {
         .expect("launch failed");
 }
 
+struct TestController { }
+
+impl Controller<State, Container<State>> for TestController {
+    fn event(&mut self, child: &mut Container<State>, ctx: &mut EventCtx, event: &Event, data: &mut State, env: &Env) {
+        println!("EVENT: {:?}", event);
+    }
+}
+
 fn ui_builder() -> impl Widget<State> {
 
     let ply_list = Scroll::new(List::new(|| {
@@ -119,7 +127,7 @@ fn ui_builder() -> impl Widget<State> {
         ).draggable(true)
     );
 
-    window_container
+    window_container //.controller(TestController{})
 }
 
 #[allow(unused_assignments)]

@@ -1,4 +1,4 @@
-use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size, LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color, Affine, MouseEvent, TextLayout, Selector, Target};
+use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size, LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color, Affine, MouseEvent, TextLayout, Selector, Target, KbKey};
 use druid::RenderContext;
 use druid::widget::{SvgData, Label};
 use druid::kurbo::Circle;
@@ -110,6 +110,17 @@ impl Widget<State> for BoardWidget {
         // debug!("Board::event: {:?}", event);
 
         match event {
+            Event::KeyUp(key_event) => {
+                debug!("KEY UP: {:?}", key_event.key);
+
+                if let KbKey::Escape = key_event.key {
+                    self.mouse_down = None;
+                    self.selected_square = None;
+                    self.dragging_piece = None;
+                    ctx.set_handled();
+                    ctx.request_paint();
+                }
+            },
             Event::MouseDown(mouse_event) => { self.mouse_down = Some(mouse_event.clone()); },
             Event::MouseUp(mouse_event) => {
                 debug!("MOUSE UP");
@@ -158,28 +169,51 @@ impl Widget<State> for BoardWidget {
                     }
                 } else {
                     // check to see if we already have a piece selected
-                    // if we do, then they're trying to move that piece
                     if let Some(selected_square) = self.selected_square {
-                        // need to find all the legal moves for this piece, and mark those squares
-                        let moves = MoveGen::new_legal(&data.game.current_position());
+                        // 3 options here:
+                        // 2) clicking on the selected square... so deselect it
+                        // 1) clicking on a square w/out a piece, so have to make sure it's a legal move
+                        // 3) clicking on another one of their pieces, select _that_ one
 
-                        for m in moves {
-                            // skip moves that don't originate on the selected square
-                            if m.get_source() != selected_square {
-                                continue
+                        // check to see if they clicked the _same_ square
+                        if selected_square == up_square {
+                            debug!("SAME SQUARE");
+                            self.selected_square = None;
+                            self.mouse_down = None;
+                        } else {
+                            let op_piece = Self::square2piece(&data.game.current_position(), &down_square);
+
+                            if let Some((_piece, color)) = op_piece {
+                                if color == data.game.current_position().side_to_move() {
+                                    self.selected_square = Some(down_square);
+                                } else {
+                                    // we use this as a flag below
+                                    self.selected_square = None;
+                                }
                             }
 
-                            // a legal move is the same as the square that was clicked
-                            if m.get_dest() == down_square {
-                                // set the move
-                                chess_move = Some(m);
-                                self.selected_square = None;
-                                break
+                            if op_piece.is_none() || self.selected_square.is_none() {
+                                // need to find all the legal moves for this piece, and mark those squares
+                                let moves = MoveGen::new_legal(&data.game.current_position());
+
+                                for m in moves {
+                                    // skip moves that don't originate on the selected square
+                                    if m.get_source() != selected_square {
+                                        continue
+                                    }
+
+                                    // a legal move is the same as the square that was clicked
+                                    if m.get_dest() == down_square {
+                                        // set the move
+                                        chess_move = Some(m);
+                                        debug!("GOT LEGAL MOVE: {:?}", chess_move);
+                                        break
+                                    }
+                                }
                             }
                         }
 
-                        // if we got here, they tried to make an illegal move, so just unselect
-                        self.selected_square = None;
+                        ctx.request_paint(); // request a re-paint
                     } else {
                         // we don't already have a square selected
                         // so check if it's on a square with a piece
@@ -256,10 +290,10 @@ impl Widget<State> for BoardWidget {
 
                     // request an update
                     ctx.request_update();
-                }
 
-                // mark the event as handled
-                ctx.set_handled();
+                    // mark the event as handled
+                    ctx.set_handled();
+                }
             }
             _ => { }
         }
