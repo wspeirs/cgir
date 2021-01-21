@@ -127,7 +127,7 @@ fn ui_builder() -> impl Widget<State> {
         ).draggable(true)
     );
 
-    window_container //.controller(TestController{})
+    window_container //x.controller(TestController{})
 }
 
 #[allow(unused_assignments)]

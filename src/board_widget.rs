@@ -249,9 +249,17 @@ impl Widget<State> for BoardWidget {
                             }
                         }
                     });
+
+                    // make sure nothing is selected
+                    self.selected_square = None;
                 }
             }, // end of MouseUp match
             Event::MouseMove(mouse_event) => {
+                // we want to register this widget for focus if the mouse is over it
+                if !ctx.has_focus() {
+                    ctx.request_focus();
+                }
+
                 // make sure the user is attempting to drag a piece
                 if self.mouse_down.is_none() {
                     return;
@@ -301,6 +309,10 @@ impl Widget<State> for BoardWidget {
 
     fn lifecycle(&mut self, ctx: &mut LifeCycleCtx, event: &LifeCycle, data: &State, env: &Env) {
         debug!("Board::lifecycle: {:?}", event);
+
+        if let LifeCycle::WidgetAdded = event {
+            ctx.register_for_focus();
+        }
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx, old_data: &State, data: &State, env: &Env) {
