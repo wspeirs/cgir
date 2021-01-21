@@ -13,10 +13,12 @@ mod uci;
 use board_widget::BoardWidget;
 use druid::im::Vector;
 use std::process::{Command, Stdio};
+use crate::uci::Uci;
 
 #[derive(Debug, Clone)]
 pub struct State {
-    game: Game, // the state of our chess game
+    game: Game,     // state of our chess game
+    engine: Uci,    // engine the human is playing against
 }
 
 impl Data for State {
@@ -25,10 +27,15 @@ impl Data for State {
     }
 }
 
-impl Default for State {
-    fn default() -> Self {
+impl State {
+    fn new() -> Self {
+        // setup an engine to play against
+        let mut engine_cmd = Command::new("/usr/games/ethereal-chess");
+        let engine = Uci::start_engine(&mut engine_cmd);
+
         State {
-            game: Game::new()
+            game: Game::new(),
+            engine
         }
     }
 }
@@ -68,17 +75,18 @@ impl Lens<State, Vector<String>> for MoveList {
 }
 
 pub fn main() {
-    let state = State::default();
+    // create a default state
+    let state = State::new();
 
     let main_window = WindowDesc::new(ui_builder)
         .set_window_state(WindowState::MAXIMIZED)
         .window_size(Size::new(1024.0, 1024.0))
-        .menu(make_menu(&State::default()))
+        .menu(make_menu(&state))
         .title("CGIR - Chess GUI in Rust");
 
     AppLauncher::with_window(main_window)
         .use_simple_logger()
-        .launch(State::default())
+        .launch(state)
         .expect("launch failed");
 }
 

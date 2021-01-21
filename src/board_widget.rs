@@ -1,20 +1,4 @@
-use druid::{Widget,
-            EventCtx,
-            LifeCycle,
-            PaintCtx,
-            LifeCycleCtx,
-            BoxConstraints,
-            Size,
-            LayoutCtx,
-            Event,
-            Env,
-            UpdateCtx,
-            Point,
-            Rect,
-            Color,
-            Affine,
-            MouseEvent,
-            TextLayout};
+use druid::{Widget, EventCtx, LifeCycle, PaintCtx, LifeCycleCtx, BoxConstraints, Size, LayoutCtx, Event, Env, UpdateCtx, Point, Rect, Color, Affine, MouseEvent, TextLayout, Selector, Target};
 use druid::RenderContext;
 use druid::widget::{SvgData, Label};
 use druid::kurbo::Circle;
@@ -27,9 +11,10 @@ use std::io::prelude::*;
 use log::{debug, error};
 use itertools::rev;
 use chess::{Square, Piece, Board, ChessMove, MoveGen, BitBoard, Game};
-use crate::uci::Uci;
+use crate::uci::{Uci, Analysis};
 use std::process::Command;
 use std::collections::HashSet;
+use std::thread;
 
 const BROWN :Color = Color::rgb8(0x91, 0x67, 0x2c);
 const WHITE :Color = Color::WHITE;
@@ -37,7 +22,7 @@ const HIGHLIGHT :Color = Color::AQUA;
 const GREEN :Color = Color::GREEN;
 
 pub struct BoardWidget {
-    uci: Uci,   // keep the analysis with the widget
+    analysis_uci: Uci,   // keep the analysis with the widget
     square_size: f64,
     white_bottom: bool, // is white on the bottom of the board?
     mouse_down: Option<MouseEvent>, // we deal with mouse events on the _up_ or _move_, so just record this
@@ -52,7 +37,7 @@ impl BoardWidget {
         let mut stockfish_cmd = Command::new("/usr/games/stockfish");
 
         BoardWidget {
-            uci: Uci::start_engine(&mut stockfish_cmd),
+            analysis_uci: Uci::start_engine(&mut stockfish_cmd),
             square_size: 0.0,
             white_bottom: true,
             mouse_down: None,
@@ -143,6 +128,8 @@ impl Widget<State> for BoardWidget {
                 self.dragging_piece = None;
                 self.mouse_down = None;
 
+                let mut chess_move = None;
+
                 // we're moving here
                 if down_square != up_square {
                     let color_to_move = data.game.current_position().side_to_move();
@@ -162,16 +149,13 @@ impl Widget<State> for BoardWidget {
                     moves.set_iterator_mask(BitBoard::from_square(up_square));
 
                     for m in &mut moves {
-                        // we found the move as a legal move, so update everything
+                        // we found the move as a legal move
                         if m == target_move {
-                            data.game.make_move(target_move);
+                            chess_move = Some(target_move); // save the move to make
                             self.selected_square = None; // remove anything that was selected
-                            return
+                            break
                         }
                     }
-
-                    // if we got here, it wasn't a legal move
-                    error!("NOT A LEGAL MOVE: {:?}", target_move);
                 } else {
                     // check to see if we already have a piece selected
                     // if we do, then they're trying to move that piece
@@ -187,16 +171,15 @@ impl Widget<State> for BoardWidget {
 
                             // a legal move is the same as the square that was clicked
                             if m.get_dest() == down_square {
-                                // make the move
-                                data.game.make_move(m);
+                                // set the move
+                                chess_move = Some(m);
                                 self.selected_square = None;
-                                return
+                                break
                             }
                         }
 
                         // if we got here, they tried to make an illegal move, so just unselect
                         self.selected_square = None;
-                        ctx.request_paint(); // request a re-paint
                     } else {
                         // we don't already have a square selected
                         // so check if it's on a square with a piece
@@ -208,6 +191,30 @@ impl Widget<State> for BoardWidget {
                             }
                         }
                     }
+                }
+
+                // check to see if we have a move to make
+                if let Some(mv) = chess_move {
+                    // make the move in the game
+                    data.game.make_move(mv);
+
+                    // start the computer's analysis
+                    let rx = data.engine.analyze(&data.game, Some(7));
+                    let event_sink = ctx.get_external_handle();
+
+                    // spawn a thread to report back when the move has been made
+                    thread::spawn(move || {
+                        for analysis in rx.iter() {
+                            println!("ANALYSIS: {:?}", analysis);
+
+                            // if we get the best move, then send it as an event
+                            if let Analysis::BestMove(best_move) = analysis {
+                                if let Err(e) = event_sink.submit_command(Selector::<ChessMove>::new("best_move"), Box::new(best_move), Target::Global) {
+                                    error!("Error submitting best-move: {:?}", e);
+                                }
+                            }
+                        }
+                    });
                 }
             }, // end of MouseUp match
             Event::MouseMove(mouse_event) => {
@@ -238,6 +245,21 @@ impl Widget<State> for BoardWidget {
 
                 // call paint to update
                 ctx.request_paint();
+            },
+            Event::Command(cmd) => {
+                // check to see if we got a best move from the computer
+                if let Some(best_move) = cmd.get(Selector::<ChessMove>::new("best_move")) {
+                    println!("GOT BEST MOVE: {:?}", best_move);
+
+                    // make the move
+                    data.game.make_move(*best_move);
+
+                    // request an update
+                    ctx.request_update();
+                }
+
+                // mark the event as handled
+                ctx.set_handled();
             }
             _ => { }
         }
@@ -253,9 +275,6 @@ impl Widget<State> for BoardWidget {
         // check for all our pieces being attacked
         let mut white_board = data.game.current_position().color_combined(chess::Color::White).clone();
         let white_squares = white_board.into_iter().collect::<HashSet<Square>>();
-
-        // let mut black_board = data.game.current_position().color_combined(chess::Color::Black).clone();
-        // let black_squares = black_board.into_iter().collect::<HashSet<Square>>();
 
         // get the board, and reset our set
         let board = data.game.current_position();
@@ -299,14 +318,15 @@ impl Widget<State> for BoardWidget {
 
         println!("BEING ATTACKED: {:?}", self.pieces_being_attacked);
 
-        // do the analysis
+        // // do the analysis
         // let analysis = self.uci.analyze(&data.game, Some(5));
         //
         // for a in analysis.iter() {
         //     println!("GOT: {:?}", a);
         // }
 
-        ctx.request_paint(); // just always request a paint
+        // just always request a paint
+        ctx.request_paint();
     }
 
     fn layout(&mut self, ctx: &mut LayoutCtx, bc: &BoxConstraints, data: &State, env: &Env) -> Size {

@@ -8,13 +8,21 @@ use log::{debug};
 use vampirc_uci::{ByteVecUciMessage, UciMessage, parse_one, UciFen, UciSearchControl, UciTimeControl, UciInfoAttribute};
 use chess::{Game, ChessMove};
 
-#[derive(Clone, Debug, Default)]
-pub struct Analysis {
+#[derive(Clone, Debug)]
+pub enum Analysis {
+    PossibleMove(PossibleMove),
+    BestMove(ChessMove)
+}
+
+/// This is a candidate move given the depth
+#[derive(Clone, Default, Debug)]
+pub struct PossibleMove {
     depth: u8,
     score: i32,
     moves: Vec<ChessMove>
 }
 
+#[derive(Debug, Clone)]
 pub struct Uci {
     stdin: Arc<Mutex<ChildStdin>>,
     stdout: Arc<Mutex<BufReader<ChildStdout>>>,
@@ -162,41 +170,49 @@ impl Uci {
                 // println!("MSG: {:?}", message);
 
                 // convert the messages into Analysis
-                match message {
+                let analysis = match message {
+                    // convert this into a PossibleMove
                     UciMessage::Info(attrs) => {
-                        let mut analysis = Analysis::default();
+                        let mut possible_move = PossibleMove::default();
 
                         for attr in attrs {
                             match attr {
-                                UciInfoAttribute::Depth(d) => { analysis.depth = d; },
-                                UciInfoAttribute::Score { cp, .. } => { if let Some(score) = cp { analysis.score = score; } },
-                                UciInfoAttribute::Pv(moves) => { analysis.moves = moves; }
+                                UciInfoAttribute::Depth(d) => { possible_move.depth = d; },
+                                UciInfoAttribute::Score { cp, .. } => { if let Some(score) = cp { possible_move.score = score; } },
+                                UciInfoAttribute::Pv(moves) => { possible_move.moves = moves; }
                                 // UciInfoAttribute::CurrMove(chess_move) => { info.push_str(&chess_move.to_string()); },
                                 _ => ()
                             }
                         }
 
-                        debug!("ANALYSIS: {:?}", analysis);
+                        debug!("POSSIBLE MOVE: {:?}", possible_move);
 
-                        // send the analysis, check for disconnected receiver
-                        if let Err(send_err) = tx.send(analysis) {
-                            debug!("SEND ERR: {:?}", send_err);
-
-                            // tell the engine to stop
-                            let mut stdin = stdin_clone.lock().unwrap();
-                            Self::send_msg(&mut stdin, UciMessage::Stop);
-                        }
+                        Analysis::PossibleMove(possible_move)
                     },
                     UciMessage::BestMove { best_move, ponder } => {
-                    //     println!("BEST MOVE: {}", best_move);
-                    //     if let Some(ponder) = ponder {
-                    //         println!("PONDER: {}", ponder);
-                    //     }
-                        break
+                        println!("BEST MOVE: {}", best_move);
+
+                        Analysis::BestMove(best_move)
                     }
                     _ => {
                         panic!("Unexpected message: {:?}", message)
                     }
+                };
+
+                let break_loop = if let Analysis::BestMove(_) = analysis { true } else { false };
+
+                // send the analysis, check for disconnected receiver
+                if let Err(send_err) = tx.send(analysis) {
+                    debug!("SEND ERR: {:?}", send_err);
+
+                    // tell the engine to stop
+                    let mut stdin = stdin_clone.lock().unwrap();
+                    Self::send_msg(&mut stdin, UciMessage::Stop);
+                }
+
+                // if we got the best move, then break out of the loop
+                if break_loop {
+                    break
                 }
             }
         });
