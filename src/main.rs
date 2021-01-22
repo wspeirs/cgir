@@ -27,7 +27,8 @@ pub struct State {
 
 impl Data for State {
     fn same(&self, other: &Self) -> bool {
-        self.game.current_position().combined() == other.game.current_position().combined()
+        self.game.current_position().combined() == other.game.current_position().combined() &&
+            self.show_pieces_being_attacked == other.show_pieces_being_attacked
     }
 }
 
@@ -121,7 +122,6 @@ fn ui_builder() -> impl Widget<State> {
     let attacker_checkbox = Checkbox::new("Show Attackers")
         .on_click(|ctx :&mut EventCtx, data: &mut bool, env| {
             *data ^= true;
-            ctx.get_external_handle().submit_command(Selector::<()>::new("update"), Box::new(()), Target::Global);
         })
         .lens(State::show_pieces_being_attacked);
 

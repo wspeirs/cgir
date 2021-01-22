@@ -303,11 +303,6 @@ impl Widget<State> for BoardWidget {
 
                     // mark the event as handled
                     ctx.set_handled();
-                } else if let Some(()) = cmd.get(Selector::<()>::new("update")) {
-                    ctx.request_update();
-
-                    // mark the event as handled
-                    ctx.set_handled();
                 }
             }
             _ => { }
