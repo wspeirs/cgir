@@ -256,6 +256,6 @@ mod uci_tests {
         let mut uci = Uci::start_engine(&mut cmd);
         let game = Game::new();
 
-        uci.analyze(&game);
+        uci.analyze(&game, None);
     }
 }

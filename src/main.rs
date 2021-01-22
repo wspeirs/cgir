@@ -9,6 +9,7 @@ use chess::{Game, Action};
 
 mod board_widget;
 mod uci;
+mod chess_utils;
 
 use board_widget::BoardWidget;
 use druid::im::Vector;
@@ -90,16 +91,7 @@ pub fn main() {
         .expect("launch failed");
 }
 
-struct TestController { }
-
-impl Controller<State, Container<State>> for TestController {
-    fn event(&mut self, child: &mut Container<State>, ctx: &mut EventCtx, event: &Event, data: &mut State, env: &Env) {
-        println!("EVENT: {:?}", event);
-    }
-}
-
 fn ui_builder() -> impl Widget<State> {
-
     let ply_list = Scroll::new(List::new(|| {
         Label::new(|chess_move :&String, _env: &_| chess_move.clone())
             .align_vertical(UnitPoint::LEFT)
@@ -127,7 +119,7 @@ fn ui_builder() -> impl Widget<State> {
         ).draggable(true)
     );
 
-    window_container //x.controller(TestController{})
+    window_container
 }
 
 #[allow(unused_assignments)]
