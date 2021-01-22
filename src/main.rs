@@ -23,12 +23,14 @@ pub struct State {
     game: Game,     // state of our chess game
     engine: Uci,    // engine the human is playing against
     show_pieces_being_attacked: bool,  // should we show pieces being attacked
+    disallow_blunders: bool, // should we prevent the user from making a blunder?
 }
 
 impl Data for State {
     fn same(&self, other: &Self) -> bool {
         self.game.current_position().combined() == other.game.current_position().combined() &&
-            self.show_pieces_being_attacked == other.show_pieces_being_attacked
+            self.show_pieces_being_attacked == other.show_pieces_being_attacked &&
+            self.disallow_blunders == other.disallow_blunders
     }
 }
 
@@ -41,7 +43,8 @@ impl State {
         State {
             game: Game::new(),
             engine,
-            show_pieces_being_attacked: true
+            show_pieces_being_attacked: true,
+            disallow_blunders: true
         }
     }
 }
@@ -119,16 +122,40 @@ fn ui_builder() -> impl Widget<State> {
         ).draggable(true)
     );
 
+    // toggle highlighting attacked squares
     let attacker_checkbox = Checkbox::new("Show Attackers")
         .on_click(|ctx :&mut EventCtx, data: &mut bool, env| {
             *data ^= true;
         })
         .lens(State::show_pieces_being_attacked);
 
+    // toggle for blunder checking
+    let blunder_checkbox = Checkbox::new("Disallow Blunders")
+        .on_click(|ctx :&mut EventCtx, data: &mut bool, env| {
+            *data ^= true;
+        })
+        .lens(State::disallow_blunders);
+
+    // build the Flex container for the bottom analysis section
+    let checkbox_layout = Flex::column()
+        .with_child(Align::left(attacker_checkbox))
+        .with_child(Align::left(blunder_checkbox))
+        .align_left()
+        ;
+
+    let analysis_container = Container::new(
+        Split::columns(
+            Align::left(Label::new("Analysis")),
+            checkbox_layout
+        ).draggable(false)
+            .solid_bar(true)
+            .split_point(0.75)
+    );
+
     let window_container = Container::new(
         Split::rows(
             Align::centered(top_container),
-            Align::centered(attacker_checkbox)
+            Align::centered(analysis_container)
         ).draggable(true)
     );
 
