@@ -16,10 +16,12 @@ use std::process::Command;
 use std::collections::HashSet;
 use std::thread;
 
+
 const BROWN :Color = Color::rgb8(0x91, 0x67, 0x2c);
 const WHITE :Color = Color::WHITE;
 const HIGHLIGHT :Color = Color::AQUA;
 const GREEN :Color = Color::GREEN;
+
 
 pub struct BoardWidget {
     analysis_uci: Uci,   // keep the analysis with the widget
@@ -301,6 +303,11 @@ impl Widget<State> for BoardWidget {
 
                     // mark the event as handled
                     ctx.set_handled();
+                } else if let Some(()) = cmd.get(Selector::<()>::new("update")) {
+                    ctx.request_update();
+
+                    // mark the event as handled
+                    ctx.set_handled();
                 }
             }
             _ => { }
@@ -326,43 +333,45 @@ impl Widget<State> for BoardWidget {
         let board = data.game.current_position();
         self.pieces_being_attacked.clear();
 
-        // go through all the white squares
-        for ws in white_squares {
-            // get all of the bishop, rook, and queen attackers for black
-            let attackers = board.color_combined(chess::Color::Black) &
-                ( (chess::get_bishop_rays(ws) & (board.pieces(Piece::Bishop) | board.pieces(Piece::Queen))) |
-                    (chess::get_rook_rays(ws) & (board.pieces(Piece::Rook) | board.pieces(Piece::Queen))) );
+        // if we're supposed to show the pieces being attacked, compute them
+        if data.show_pieces_being_attacked {
+            // go through all the white squares
+            for ws in white_squares {
+                // get all of the bishop, rook, and queen attackers for black
+                let attackers = board.color_combined(chess::Color::Black) &
+                    ((chess::get_bishop_rays(ws) & (board.pieces(Piece::Bishop) | board.pieces(Piece::Queen))) |
+                        (chess::get_rook_rays(ws) & (board.pieces(Piece::Rook) | board.pieces(Piece::Queen))));
 
-            for attack_square in attackers {
-                let between = chess::between(ws, attack_square) & board.combined();
+                for attack_square in attackers {
+                    let between = chess::between(ws, attack_square) & board.combined();
 
-                // if nothing is between these two squares, then it's an attack
-                if between == chess::EMPTY {
-                    println!("{} ATTACKING {}", attack_square, ws);
+                    // if nothing is between these two squares, then it's an attack
+                    if between == chess::EMPTY {
+                        println!("{} ATTACKING {}", attack_square, ws);
+                        self.pieces_being_attacked.insert(ws);
+                    }
+                }
+
+                // now look at the knights
+                let attackers = chess::get_knight_moves(ws) & board.color_combined(chess::Color::Black) & board.pieces(Piece::Knight);
+
+                for attack_square in attackers {
+                    println!("KNIGHT {} ATTACKING {}", attack_square, ws);
                     self.pieces_being_attacked.insert(ws);
                 }
             }
 
-            // now look at the knights
-            let attackers = chess::get_knight_moves(ws) & board.color_combined(chess::Color::Black) & board.pieces(Piece::Knight);
+            // now look at pawn attacks
+            for black_pawn_square in board.color_combined(chess::Color::Black) & board.pieces(Piece::Pawn) {
+                let attackers = chess::get_pawn_attacks(black_pawn_square, chess::Color::Black, *board.color_combined(chess::Color::White));
 
-            for attack_square in attackers {
-                println!("KNIGHT {} ATTACKING {}", attack_square, ws);
-                self.pieces_being_attacked.insert(ws);
+                for attacked_square in attackers {
+                    println!("PAWN ATTACKING {}", attacked_square);
+                    self.pieces_being_attacked.insert(attacked_square);
+                }
             }
         }
 
-        // now look at pawn attacks
-        for black_pawn_square in board.color_combined(chess::Color::Black) & board.pieces(Piece::Pawn) {
-            let attackers = chess::get_pawn_attacks(black_pawn_square, chess::Color::Black, *board.color_combined(chess::Color::White));
-
-            for attacked_square in attackers {
-                println!("PAWN ATTACKING {}", attacked_square);
-                self.pieces_being_attacked.insert(attacked_square);
-            }
-        }
-
-        println!("BEING ATTACKED: {:?}", self.pieces_being_attacked);
 
         // // do the analysis
         // let analysis = self.uci.analyze(&data.game, Some(5));

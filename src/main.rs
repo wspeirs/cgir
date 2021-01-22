@@ -1,8 +1,8 @@
 use std::default::Default;
 
 use druid::widget::prelude::*;
-use druid::widget::{Align, Flex, Label, Container, Split, List, Scroll, Controller};
-use druid::{AppLauncher, Color, Data, MenuDesc, MenuItem, WindowDesc, WidgetExt, WindowState, Lens, UnitPoint};
+use druid::widget::{Align, Flex, Label, Container, Split, List, Scroll, Controller, Button};
+use druid::{AppLauncher, Color, Data, MenuDesc, MenuItem, WindowDesc, WidgetExt, WindowState, Lens, UnitPoint, Selector, Target};
 
 // use log::{debug, info};
 use chess::{Game, Action};
@@ -15,11 +15,14 @@ use board_widget::BoardWidget;
 use druid::im::Vector;
 use std::process::{Command, Stdio};
 use crate::uci::Uci;
+use std::sync::Arc;
+
 
 #[derive(Debug, Clone)]
 pub struct State {
     game: Game,     // state of our chess game
     engine: Uci,    // engine the human is playing against
+    show_pieces_being_attacked: bool,  // should we show pieces being attacked
 }
 
 impl Data for State {
@@ -36,7 +39,8 @@ impl State {
 
         State {
             game: Game::new(),
-            engine
+            engine,
+            show_pieces_being_attacked: true
         }
     }
 }
@@ -104,18 +108,27 @@ fn ui_builder() -> impl Widget<State> {
         .align_vertical(UnitPoint::TOP_LEFT)
         ;
 
+    let bw = BoardWidget::new();
+
     // this holds the top 2 splits: board | Plys
     let top_container = Container::new(
         Split::columns(
-            Align::centered(BoardWidget::new()),
+            Align::centered(bw),
             Align::centered(ply_list)
         ).draggable(true)
     );
 
+    let attacker_button = Button::new("Show Attackers").on_click(move |ctx, data: &mut State, env| {
+        println!("SHOW: {}", data.show_pieces_being_attacked);
+
+        data.show_pieces_being_attacked ^= true;
+        ctx.get_external_handle().submit_command(Selector::<()>::new("update"), Box::new(()), Target::Global);
+    });
+
     let window_container = Container::new(
         Split::rows(
             Align::centered(top_container),
-            Align::centered(Label::new("ANALYSIS"))
+            Align::centered(attacker_button)
         ).draggable(true)
     );
 
