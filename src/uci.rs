@@ -4,7 +4,7 @@ use std::thread;
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Mutex, Arc};
 
-use log::{debug};
+use log::{debug, warn};
 use vampirc_uci::{ByteVecUciMessage, UciMessage, parse_one, UciFen, UciSearchControl, UciTimeControl, UciInfoAttribute};
 use chess::{Game, ChessMove};
 
@@ -119,8 +119,6 @@ impl Uci {
     /// When the depth is reached (None for infinite), or the Receiver is dropped,
     /// the engine will stop its analysis
     pub fn analyze(&mut self, game :&Game, depth :Option<u8>) -> Receiver<Analysis> {
-        println!("CUR POS: {}", game.current_position().to_string());
-
         { // scope our lock
             let mut stdin = self.stdin.lock().unwrap();
 
@@ -185,13 +183,14 @@ impl Uci {
                             }
                         }
 
-                        debug!("POSSIBLE MOVE: {:?}", possible_move);
+                        debug!("POSSIBLE MOVE: {} {} {:?}",
+                               possible_move.depth,
+                               possible_move.score,
+                               possible_move.moves.iter().map(|mv| format!("{}", mv)).collect::<Vec<_>>());
 
                         Analysis::PossibleMove(possible_move)
                     },
                     UciMessage::BestMove { best_move, ponder } => {
-                        println!("BEST MOVE: {}", best_move);
-
                         Analysis::BestMove(best_move)
                     }
                     _ => {
@@ -219,6 +218,23 @@ impl Uci {
 
         // return the receiver side of the channel
         rx
+    }
+
+    /// Given a game and depth, find the best move and it's score
+    pub fn get_best_move(&mut self, game :&Game, depth: u8) -> (ChessMove, i32) {
+        let rx = self.analyze(game, Some(depth));
+        let mut last_possible_move = PossibleMove::default();
+
+        for analysis in rx {
+            match analysis {
+                Analysis::BestMove(cm) => return (cm, last_possible_move.score),
+                Analysis::PossibleMove(pm) => last_possible_move = pm
+            }
+        }
+
+        // something is wrong if we made it to here, but return
+        warn!("Never received a best move");
+        (last_possible_move.moves[0], last_possible_move.score)
     }
 }
 

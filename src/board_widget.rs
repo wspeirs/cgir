@@ -22,6 +22,9 @@ const WHITE :Color = Color::WHITE;
 const HIGHLIGHT :Color = Color::AQUA;
 const GREEN :Color = Color::GREEN;
 
+const ENGINE_DEPTH :u8 = 5;     // how deep should the engine we're playing against look
+const ANALYSIS_DEPTH :u8 = 7;   // how deep should the analysis engine look?
+
 
 pub struct BoardWidget {
     analysis_uci: Uci,   // keep the analysis with the widget
@@ -113,7 +116,7 @@ impl Widget<State> for BoardWidget {
 
         match event {
             Event::KeyUp(key_event) => {
-                debug!("KEY UP: {:?}", key_event.key);
+                // debug!("KEY UP: {:?}", key_event.key);
 
                 if let KbKey::Escape = key_event.key {
                     self.mouse_down = None;
@@ -125,7 +128,7 @@ impl Widget<State> for BoardWidget {
             },
             Event::MouseDown(mouse_event) => { self.mouse_down = Some(mouse_event.clone()); },
             Event::MouseUp(mouse_event) => {
-                debug!("MOUSE UP");
+                // debug!("MOUSE UP");
                 // first check to see if we have a MouseDown... if not, that's an error
                 if self.mouse_down.is_none() {
                     panic!("No corresponding MouseDown event");
@@ -135,7 +138,7 @@ impl Widget<State> for BoardWidget {
                 let down_square = self.point2square(&self.mouse_down.as_ref().unwrap().pos);
                 let up_square = self.point2square(&mouse_event.pos);
 
-                debug!("DOWN ON: {} UP ON: {}", down_square, up_square);
+                // debug!("DOWN ON: {} UP ON: {}", down_square, up_square);
 
                 // reset the drag and mouse down regardless
                 self.dragging_piece = None;
@@ -231,18 +234,32 @@ impl Widget<State> for BoardWidget {
 
                 // check to see if we have a move to make
                 if let Some(mv) = chess_move {
+                    // check to see if a blunder was made
+                    // we only start checking after 6 moves... cannot screw up that badly that early :-)
+                    if data.disallow_blunders && data.game.actions().len() > 5 {
+                        // get the best move from the analysis engine
+                        let (best_mv, score) = self.analysis_uci.get_best_move(&data.game, ANALYSIS_DEPTH);
+
+                        if mv != best_mv {
+                            println!("BLUNDER! BEST: {} YOURS: {}", best_mv, mv);
+                            // unset the chess move
+                            chess_move = None;
+                        }
+                    }
+                }
+
+                // have to double-check that we have a move, because we might have un-made if there was a blunder
+                if let Some(mv) = chess_move {
                     // make the move in the game
                     data.game.make_move(mv);
 
                     // start the computer's analysis
-                    let rx = data.engine.analyze(&data.game, Some(7));
+                    let rx = data.engine.analyze(&data.game, Some(ENGINE_DEPTH));
                     let event_sink = ctx.get_external_handle();
 
                     // spawn a thread to report back when the move has been made
                     thread::spawn(move || {
                         for analysis in rx.iter() {
-                            println!("ANALYSIS: {:?}", analysis);
-
                             // if we get the best move, then send it as an event
                             if let Analysis::BestMove(best_move) = analysis {
                                 if let Err(e) = event_sink.submit_command(Selector::<ChessMove>::new("best_move"), Box::new(best_move), Target::Global) {
@@ -266,8 +283,6 @@ impl Widget<State> for BoardWidget {
                 if self.mouse_down.is_none() {
                     return;
                 }
-
-                // debug!("DRAGGING");
 
                 // check to see if we already know we're dragging
                 if let Some((square, pos)) = self.dragging_piece.as_mut() {
@@ -293,8 +308,6 @@ impl Widget<State> for BoardWidget {
             Event::Command(cmd) => {
                 // check to see if we got a best move from the computer
                 if let Some(best_move) = cmd.get(Selector::<ChessMove>::new("best_move")) {
-                    println!("GOT BEST MOVE: {:?}", best_move);
-
                     // make the move
                     data.game.make_move(*best_move);
 
@@ -318,7 +331,7 @@ impl Widget<State> for BoardWidget {
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx, old_data: &State, data: &State, env: &Env) {
-        debug!("Widget::update");
+        // debug!("Widget::update");
 
         // check for all our pieces being attacked
         let mut white_board = data.game.current_position().color_combined(chess::Color::White).clone();
@@ -342,7 +355,6 @@ impl Widget<State> for BoardWidget {
 
                     // if nothing is between these two squares, then it's an attack
                     if between == chess::EMPTY {
-                        println!("{} ATTACKING {}", attack_square, ws);
                         self.pieces_being_attacked.insert(ws);
                     }
                 }
@@ -351,7 +363,6 @@ impl Widget<State> for BoardWidget {
                 let attackers = chess::get_knight_moves(ws) & board.color_combined(chess::Color::Black) & board.pieces(Piece::Knight);
 
                 for attack_square in attackers {
-                    println!("KNIGHT {} ATTACKING {}", attack_square, ws);
                     self.pieces_being_attacked.insert(ws);
                 }
             }
@@ -361,19 +372,10 @@ impl Widget<State> for BoardWidget {
                 let attackers = chess::get_pawn_attacks(black_pawn_square, chess::Color::Black, *board.color_combined(chess::Color::White));
 
                 for attacked_square in attackers {
-                    println!("PAWN ATTACKING {}", attacked_square);
                     self.pieces_being_attacked.insert(attacked_square);
                 }
             }
         }
-
-
-        // // do the analysis
-        // let analysis = self.uci.analyze(&data.game, Some(5));
-        //
-        // for a in analysis.iter() {
-        //     println!("GOT: {:?}", a);
-        // }
 
         // just always request a paint
         ctx.request_paint();
