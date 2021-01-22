@@ -1,7 +1,7 @@
 use std::default::Default;
 
 use druid::widget::prelude::*;
-use druid::widget::{Align, Flex, Label, Container, Split, List, Scroll, Controller, Button};
+use druid::widget::{Align, Flex, Label, Container, Split, List, Scroll, Controller, Button, Checkbox};
 use druid::{AppLauncher, Color, Data, MenuDesc, MenuItem, WindowDesc, WidgetExt, WindowState, Lens, UnitPoint, Selector, Target};
 
 // use log::{debug, info};
@@ -18,7 +18,7 @@ use crate::uci::Uci;
 use std::sync::Arc;
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Lens)]
 pub struct State {
     game: Game,     // state of our chess game
     engine: Uci,    // engine the human is playing against
@@ -118,17 +118,17 @@ fn ui_builder() -> impl Widget<State> {
         ).draggable(true)
     );
 
-    let attacker_button = Button::new("Show Attackers").on_click(move |ctx, data: &mut State, env| {
-        println!("SHOW: {}", data.show_pieces_being_attacked);
-
-        data.show_pieces_being_attacked ^= true;
-        ctx.get_external_handle().submit_command(Selector::<()>::new("update"), Box::new(()), Target::Global);
-    });
+    let attacker_checkbox = Checkbox::new("Show Attackers")
+        .on_click(|ctx :&mut EventCtx, data: &mut bool, env| {
+            *data ^= true;
+            ctx.get_external_handle().submit_command(Selector::<()>::new("update"), Box::new(()), Target::Global);
+        })
+        .lens(State::show_pieces_being_attacked);
 
     let window_container = Container::new(
         Split::rows(
             Align::centered(top_container),
-            Align::centered(attacker_button)
+            Align::centered(attacker_checkbox)
         ).draggable(true)
     );
 
