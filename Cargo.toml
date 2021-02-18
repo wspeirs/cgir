@@ -14,3 +14,5 @@ log = "0.4"
 itertools = "0.10"
 vampirc-uci = {version="0.11.0", features=["chess"]}
 
+[dev-dependencies]
+simple_logger = "1.11"

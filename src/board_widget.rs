@@ -238,10 +238,10 @@ impl Widget<State> for BoardWidget {
                     // we only start checking after 6 moves... cannot screw up that badly that early :-)
                     if data.disallow_blunders && data.game.actions().len() > 5 {
                         // get the best move from the analysis engine
-                        let (best_mv, score) = self.analysis_uci.get_best_move(&data.game, ANALYSIS_DEPTH);
+                        let (is_blunder, best_moves) = self.analysis_uci.check_for_blunder(&data.game, mv, ANALYSIS_DEPTH);
 
-                        if mv != best_mv {
-                            println!("BLUNDER! BEST: {} YOURS: {}", best_mv, mv);
+                        if is_blunder {
+                            println!("BLUNDER! BEST: {} YOURS: {}", best_moves[0].1, mv);
                             // unset the chess move
                             chess_move = None;
                         }
@@ -254,7 +254,7 @@ impl Widget<State> for BoardWidget {
                     data.game.make_move(mv);
 
                     // start the computer's analysis
-                    let rx = data.engine.analyze(&data.game, Some(ENGINE_DEPTH));
+                    let rx = data.engine.analyze(&data.game, vec![], Some(ENGINE_DEPTH));
                     let event_sink = ctx.get_external_handle();
 
                     // spawn a thread to report back when the move has been made
