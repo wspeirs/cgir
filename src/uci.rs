@@ -73,8 +73,6 @@ impl Uci {
             message = Self::recv_msg(&mut stdout) ;
         }
 
-        // TODO: add option setting here
-
         // check to see if it's ready
         Self::send_msg(&mut stdin, UciMessage::IsReady);
         message = Self::recv_msg(&mut stdout) ;
@@ -91,11 +89,11 @@ impl Uci {
         // bump the number of threads so it works faster :-)
         Self::send_msg(&mut stdin, UciMessage::SetOption {name: "Threads".to_string(), value: Some("4".to_string())});
 
-        // also tell it to use analysis mode
-        Self::send_msg(&mut stdin, UciMessage::SetOption { name: "UCI_AnalyseMode".to_string(), value: Some("true".to_string()) });
-
-        // tell it to do multiple lines?
-        Self::send_msg(&mut stdin, UciMessage::SetOption { name: "MultiPV".to_string(), value: Some("5".to_string() )});
+        // // also tell it to use analysis mode
+        // Self::send_msg(&mut stdin, UciMessage::SetOption { name: "UCI_AnalyseMode".to_string(), value: Some("true".to_string()) });
+        //
+        // // tell it to do multiple lines?
+        // Self::send_msg(&mut stdin, UciMessage::SetOption { name: "MultiPV".to_string(), value: Some("5".to_string() )});
 
         // check to see if it's ready
         Self::send_msg(&mut stdin, UciMessage::IsReady);
@@ -111,7 +109,23 @@ impl Uci {
         }
     }
 
+    pub fn set_option(&mut self, name :&str, value :&str) {
+        let mut stdin = self.stdin.lock().unwrap();
+        let mut stdout = self.stdout.lock().unwrap();
+
+        // send the option message
+        Self::send_msg(&mut stdin, UciMessage::SetOption { name: name.to_string(), value: Some("4".to_string()) });
+
+        // check to see if it's ready
+        Self::send_msg(&mut stdin, UciMessage::IsReady);
+
+        if UciMessage::ReadyOk != Self::recv_msg(&mut stdout) {
+            panic!("Error setting option")
+        }
+    }
+
     fn send_msg(stdin :&mut ChildStdin, message :UciMessage) {
+        println!("MSG: {}", message.to_string());
         stdin.write_all(ByteVecUciMessage::from(message).as_ref()).expect("Error writing");
         stdin.flush().expect("Error flushing");
     }
@@ -147,7 +161,7 @@ impl Uci {
                     search_control: Some(UciSearchControl {
                         search_moves: vec![],
                         mate: None,
-                        depth: depth,
+                        depth,
                         nodes: None
                     })
                 });
@@ -258,12 +272,13 @@ impl Uci {
             .into_iter()
             .map(|(_mpv, pm)| (pm.score, pm.moves[0]))
             .sorted_by_key(|(score, mv)| *score)
+            .rev() // we want the best score first
             .collect_vec();
 
         debug!("BEST MOVES");
         best_moves.iter().for_each(|(score, mv)| debug!("{}: {}", score, mv));
 
-        // check to see if this move is one of the "best" moves
+        // check to see if this move is one of the "best" moves, if it is, then it's not a blunder
         if best_moves.iter().any(|(score, mv)| *mv == proposed_move) {
             return (false, best_moves)
         }
@@ -278,20 +293,27 @@ impl Uci {
             }
         }
 
-        debug!("BEST RESPONSES");
-        best_responses.iter().for_each(|(_mpv, mv)| debug!("{}: {}", mv.score, mv.moves[0]));
-
         // get the score of the best response
-        let best_response_score = best_responses
+        let best_responses = best_responses
             .into_iter()
-            .map(|(_mpv, pm)| pm.score)
-            .sorted()
-            .next()
-            .expect("Did not find any responses");
+            .map(|(_mpv, pm)| (pm.score, pm.moves[0]))
+            .sorted_by_key(|(score, mv)| *score)
+            .rev()
+            .collect_vec();
 
-        debug!("BEST RESPONSE SCORE: {}", best_response_score);
+        debug!("BEST RESPONSES");
+        best_responses.iter().for_each(|(score, mv)| debug!("{}: {}", score, mv));
 
-        return (false, vec![])
+        // compute the diff from the best move to the best response, if it's more than a 300 points swing, that's a blunder
+        let diff = (best_responses[0].0 - best_moves[0].0).abs();
+
+        debug!("DIFF: {}", diff);
+
+        if diff > 350 {
+            (true, best_moves)
+        } else {
+            (false, best_moves)
+        }
     }
 }
 
@@ -353,15 +375,40 @@ mod uci_tests {
     }
 
     #[test]
-    fn check_for_blunder_test() {
+    fn check_for_blunder_true_test() {
         SimpleLogger::new().init().unwrap();
         let mut cmd = Command::new("/usr/games/stockfish");
         let mut uci = Uci::start_engine(&mut cmd);
-        let game = Game::from_str("r1bqkb1r/pppp1ppp/2n2n2/4p3/4P3/3P1P2/PPP3PP/RNBQKBNR w KQkq - 0 1").expect("Error creating game");
-        let blunder_move = ChessMove::new(Square::B1, Square::B3, None);
 
-        let (mv, score) = uci.check_for_blunder(&game, blunder_move, 18);
-        println!("{}", mv);
+        uci.set_option("UCI_AnalyseMode", "true");
+        uci.set_option("MultiPV", "5");
+
+        // let game = Game::from_str("r1bqkb1r/pppp1ppp/2n2n2/4p3/4P3/3P1P2/PPP3PP/RNBQKBNR w KQkq - 0 1").expect("Error creating game");
+        // let blunder_move = ChessMove::new(Square::B2, Square::B4, None);
+
+        let game = Game::from_str("r1bqkb1r/pppp1ppp/5n2/4p3/2PnP3/3P1P2/PP4PP/RNBQKBNR w KQkq - 1 2").expect("Error creating game");
+        let blunder_move = ChessMove::new(Square::D1, Square::B3, None);
+
+        let (mv, score) = uci.check_for_blunder(&game, blunder_move, 5);
+
+        assert!(mv) // this is a blunder
+    }
+
+    #[test]
+    fn check_for_blunder_false_test() {
+        SimpleLogger::new().init().unwrap();
+        let mut cmd = Command::new("/usr/games/stockfish");
+        let mut uci = Uci::start_engine(&mut cmd);
+
+        uci.set_option("UCI_AnalyseMode", "true");
+        uci.set_option("MultiPV", "5");
+
+        let game = Game::from_str("r1bqkb1r/pppp1ppp/2n2n2/4p3/4P3/3P1P2/PPP3PP/RNBQKBNR w KQkq - 0 1").expect("Error creating game");
+        let blunder_move = ChessMove::new(Square::C1, Square::G5, None);
+
+        let (mv, score) = uci.check_for_blunder(&game, blunder_move, 5);
+
+        assert!(!mv) // this isn't a blunder
     }
 
 }

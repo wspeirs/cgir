@@ -37,8 +37,12 @@ impl Data for State {
 impl State {
     fn new() -> Self {
         // setup an engine to play against
-        let mut engine_cmd = Command::new("/usr/games/ethereal-chess");
-        let engine = Uci::start_engine(&mut engine_cmd);
+        let mut engine_cmd = Command::new("/usr/games/stockfish");
+        let mut engine = Uci::start_engine(&mut engine_cmd);
+
+        // set options to match lichess level 3
+        // see: https://lichess.org/blog/U4mtoEQAAEEAgZRL/strongest-chess-player-ever
+        engine.set_option("Skill Level", "9");
 
         State {
             game: Game::new(),

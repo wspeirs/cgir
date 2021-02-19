@@ -22,8 +22,8 @@ const WHITE :Color = Color::WHITE;
 const HIGHLIGHT :Color = Color::AQUA;
 const GREEN :Color = Color::GREEN;
 
-const ENGINE_DEPTH :u8 = 5;     // how deep should the engine we're playing against look
-const ANALYSIS_DEPTH :u8 = 7;   // how deep should the analysis engine look?
+const ENGINE_DEPTH :u8 = 3;     // how deep should the engine we're playing against look
+const ANALYSIS_DEPTH :u8 = 5;   // how deep should the analysis engine look?
 
 
 pub struct BoardWidget {
@@ -40,6 +40,11 @@ impl BoardWidget {
     pub(crate) fn new() -> Self {
         // setup the stockfish engine
         let mut stockfish_cmd = Command::new("/usr/games/stockfish");
+        let mut analysis_engine = Uci::start_engine(&mut stockfish_cmd);
+
+        // set a few options for analysis
+        analysis_engine.set_option("UCI_AnalyseMode", "true");
+        analysis_engine.set_option("MultiPV", "5");
 
         BoardWidget {
             analysis_uci: Uci::start_engine(&mut stockfish_cmd),
